@@ -910,6 +910,7 @@ The P1 suite is unchanged and still passes, so there is **no regression**.
 **Date:** 2026-11-20 / 2026-11-21
 **Machine:** Windows 10/11, i5-12th gen, 16 cores, CPU only (ONNX Runtime, no GPU)
 **Fixtures:** 1920x1080 PNG, unchanged from P1/P2 except the three new ones (h), (i), (j)
+**Commit:** `6b3e64a` - <https://github.com/TranDaiHiep2006/translate_wuwa/commit/6b3e64ad788c7522c503fcc77e5942b7213d78fd>
 
 ---
 
@@ -1326,7 +1327,22 @@ median of 7 runs with min/max).
 
 ## 9. The commit and the push
 
-See the end of this section (filled in after the push).
+**Commit:** `6b3e64a` - *"P3: two-step OCR read, tiled refresh, per-region ROI,
+async pipeline, adaptive grouping, HUD and hot-plug"*
+
+**GitHub:** <https://github.com/TranDaiHiep2006/translate_wuwa/commit/6b3e64ad788c7522c503fcc77e5942b7213d78fd>
+
+**The push succeeded.** The remote `origin/main` is at `6b3e64a`, the same
+commit as the local `HEAD`:
+
+```
+$ git push origin main
+To https://github.com/TranDaiHiep2006/translate_wuwa
+   430b736..6b3e64a  main -> main
+```
+
+The P3 work is therefore in **one commit** on top of the P2 HEAD (`430b736`).
+The P1/P2 history is untouched.
 
 ---
 
