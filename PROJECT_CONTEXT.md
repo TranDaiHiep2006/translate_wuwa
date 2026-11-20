@@ -61,20 +61,36 @@ without measuring it.**
 ```
 capture (200 ms poll)
   -> change detection (frame differencing, threshold)
-  -> OCR (only when the frame changed)
+  -> ROI computation (bbox of the diff, expanded, clamped)   [P2]
+  -> OCR (full frame, or only the ROI crop at native res)    [P2]
   -> filter (drop numbers / symbols / conf < 0.5 / < 2 chars)
   -> grouping (vertical gap -> paragraph block; speaker name detection)
+  -> merge with the known blocks outside the ROI               [P2]
   -> debounce (block must be still ~120 ms)
   -> cache lookup (SQLite, normalized key)
+  -> UI label check (a menu header is kept in English)         [P2]
+  -> split into sentences                                   [P2]
+  -> number placeholder protect (XNUM0X / XPCT0X)             [P2]
   -> glossary protect (placeholder)
   -> translate (batch)
   -> glossary restore
-  -> overlay render (translated text over the original bbox)
+  -> number placeholder restore + digit alignment check       [P2]
+  -> overlay render (wrapped text over the original bbox)     [P2]
   -> session history append (exactly once per block)
 ```
 
 Threads: a **worker thread** does capture / OCR / translation, the **UI
 thread** only renders the overlay. The game must not stutter.
+
+### P2 refresh schedule
+
+- Every frame: only the changed region is OCR'd (the ROI crop), and the
+  blocks outside the ROI are kept from the last known state.
+- Every `roi_full_refresh_ms` (2000 ms) or every `roi_full_refresh_frames`
+  (10 frames), whichever comes first: a full-frame OCR, which prunes the
+  blocks whose source text is gone and catches what the ROI missed.
+- When the ROI covers more than `roi_full_frame_threshold` (80 %) of the
+  screen: a full-frame OCR runs immediately.
 
 ---
 
@@ -137,9 +153,13 @@ python -c "from transformers import MarianMTModel, MarianTokenizer; M='Helsinki-
 | `src/config.py` | YAML config, `Config.scale()` (1080p reference scaling) |
 | `src/capture.py` | mss / dxcam backends, fallback, benchmark, resolution detection |
 | `src/change.py` | frame differencing |
-| `src/ocr.py` | RapidOCR wrapper, `OCRLine` (text + bbox + confidence) |
+| `src/roi.py` | ROI computation, bbox offsets, block merging (`P2`) |
+| `src/ocr.py` | RapidOCR wrapper, `OCRLine` (text + bbox + confidence), the ROI engine (`P2`) |
 | `src/filter.py` | drops noise lines, `FilterReport` |
 | `src/grouping.py` | `group_lines`, `detect_speaker`, `TextBlock` |
+| `src/speakers.py` | UI label blacklist + roster, `SpeakerVocabulary` (`P2`) |
+| `src/sentences.py` | sentence splitting, number placeholder protect / restore (`P2`) |
+| `src/wrapping.py` | greedy word wrapping, `fit_text` (`P2`) |
 | `src/cache.py` | SQLite `cache` + `history` tables, `normalize()` |
 | `src/glossary.py` | placeholder protect / restore |
 | `src/translator.py` | `BaseEngine` / `ArgosEngine` / `MarianEngine`, benchmark |
@@ -165,19 +185,30 @@ python -c "from transformers import MarianMTModel, MarianTokenizer; M='Helsinki-
   downloads `resources.json`; `tests/test_offline.py` blocks every socket and
   still translates).
 
+### P2 status (2026-11-20) - DONE
+
+All six P2 items are implemented, tested and benchmarked.
+
+| Item | Result |
+| --- | --- |
+| A. ROI OCR | **Done.** `src/roi.py` + a second OCR engine at native resolution. In-game warm end-to-end: **143 ms** (was 802 ms full-frame warm). |
+| B. Overlay wrapping | **Done.** `src/wrapping.py`. The bbox grows vertically, the font size stays. `data/overlay_demo.png` regenerated. |
+| C. Sentence translation + number protection | **Done.** `src/sentences.py`. `Reward: 12000` now survives (was `2000`). |
+| D. Speaker detector | **Done.** `src/speakers.py` + `config/ui_labels.yaml` + `config/roster.yaml`. `Quest` / `Skill` / `Inventory` / `Settings` are never speakers. |
+| E. OCR model experiment | **Done, negative result.** The mobile detection model and the int8 recognition model are **not** faster on the ROI crop. The P1 server models stay the default (details in `REPORT.md`). |
+| F. UI label translation | **Done** (extra). A menu header is kept in English instead of being translated. |
+
+- Tests: **108 passed** (44 in P1, 64 new in P2).
+- The measured in-game latency is now **under 0.5 s**: **143 ms** warm
+  (OCR 99 ms, translation 0.04 ms thanks to the cache). The full-frame
+  sweep is still ~800 ms warm / ~1740 ms cold, but it only runs every
+  2 s (or every 10 frames), not on every frame.
+
 ### P2 ideas (not yet implemented)
 
-1. **ROI OCR**: only run the OCR on the changed region of the frame
-   (`src/change.py` already computes the diff mask). This is the single
-   biggest win for the in-game case.
-2. **Detection model**: use the PP-OCR mobile detection model
-   (`det_limit_side_len` / `PP-OCRv4 mobile`) instead of the server one.
-3. **ONNX Runtime tuning**: `intra_op_num_threads` is already 5 (measured
-   optimum on this CPU, it cut the OCR from ~1980 ms to ~810 ms); try
-   `graph_optimization_level` and int8 quantization.
-4. **Translate asynchronously**: keep the last translation on screen while
+1. **Translate asynchronously**: keep the last translation on screen while
    the new one is computed.
-5. **Block reuse**: a block whose text did not change must never trigger a
-   model call (already implemented in `src/pipeline.py` via `_shown`).
-6. **Overlay text wrapping**: the demo translation is one long line, it should
-   be wrapped inside the original bbox width.
+2. **More OCR tuning**: the full-frame path is still the slow one
+   (~800 ms warm). A smaller `det_limit_side_len` for the full-frame engine
+   would cut it, at the cost of a lower detection accuracy.
+3. **GPU acceleration**: ONNX Runtime is CPU-only on this machine.

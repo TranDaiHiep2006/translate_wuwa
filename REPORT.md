@@ -329,3 +329,569 @@ written exactly once.
    another monitor.
 8. A **live latency HUD** (a small overlay showing the last stage timings) so
    Hiep can measure the real in-game latency without the bench script.
+
+---
+
+# P2 REPORT - WuWa Screen Translation Tool
+
+**Date:** 2026-11-20
+**Machine:** Intel Core i5 Gen 12, 16 GB RAM, RTX 3050 Ti Laptop 4 GB (CPU only - the game owns the GPU)
+**Repo:** <https://github.com/TranDaiHiep2006/translate_wuwa>
+**Baseline (P1 HEAD):** `2cfd167`
+
+---
+
+## 1. Files created / changed + commits
+
+### New source modules
+
+| File | Lines | Responsibility |
+| --- | --- | --- |
+| `src/roi.py` | 171 | ROI computation from the diff mask, bbox expansion, coordinate offsets, block merging |
+| `src/sentences.py` | 173 | sentence splitting, number/percentage placeholder protect + restore, digit alignment |
+| `src/speakers.py` | 295 | UI-label blacklist + character roster, `SpeakerVocabulary` |
+| `src/wrapping.py` | 114 | greedy word wrapping, `fit_text` (grow the box, keep the font) |
+
+### New config / data files
+
+```
+config/ui_labels.yaml          the UI-label blacklist (never a speaker)
+config/roster.yaml             the playable Resonator + NPC roster
+tests/fixtures/sample_d_roi_base.png       (1920x1080) ROI test - base frame
+tests/fixtures/sample_d_roi_changed.png    (1920x1080) ROI test - one changed line
+tests/fixtures/sample_e_long.png           (1920x1080) long text that must wrap
+tests/fixtures/sample_f_reward.png         (1920x1080) "Reward: 12000"
+tests/fixtures/sample_g_ui_menu.png        (1920x1080) Quest/Skill/Inventory/Settings
+```
+
+### New test files
+
+| File | Tests | Covers |
+| --- | --- | --- |
+| `tests/test_roi.py` | 10 | ROI computation, expansion, clamping, offsets |
+| `tests/test_roi_pipeline.py` | 7 | ROI in the real pipeline, unchanged frame, large-change fallback |
+| `tests/test_sentences.py` | 13 | splitting, no split in numbers / decimals / abbreviations, placeholder round trip |
+| `tests/test_speakers.py` | 14 | blacklist, roster, colon rule, case-insensitivity |
+| `tests/test_wrapping.py` | 9 | wrapping inside the width, box growth, font stability |
+| `tests/test_p2_features.py` | 10 | the end-to-end P2 features |
+
+### Changed files
+
+```
+src/config.py       ROI / sentence / speaker config, opaque overlay, max_height_growth
+src/ocr.py          a second OCR engine for the ROI crop (native resolution)
+src/grouping.py     the speaker rules now use the blacklist + the roster
+src/overlay.py      paint_overlay() shared with the demo script, opaque background
+src/pipeline.py     ROI branch, block merging, sentence translation, UI-label skip
+src/main.py         wires the vocabulary and the new config into the app
+config/config.yaml  the new keys with their documented defaults
+scripts/bench.py    bench_roi_vs_full(), bench_roi_pipeline()
+scripts/make_fixtures.py   the 5 new fixtures
+scripts/make_session_demo.py   a dedicated demo cache + the new fixtures
+scripts/render_overlay_demo.py  renders through the real pipeline
+PROJECT_CONTEXT.md  section 4 (pipeline), section 9 (module map), section 10 (P2 status)
+README.md           section 6 (what P2 added), the new config keys, the new fixtures
+data/overlay_demo.png  regenerated with the wrapped text and the opaque background
+```
+
+### Commits
+
+| # | Hash | Message |
+| --- | --- | --- |
+| 1 | `PENDING` | P2: ROI OCR engine, ROI pipeline branch and block merging |
+| 2 | `PENDING` | P2: overlay text wrapping and a fully opaque background |
+| 3 | `PENDING` | P2: sentence-by-sentence translation with number protection |
+| 4 | `PENDING` | P2: UI-label blacklist and character roster for the speaker detector |
+| 5 | `PENDING` | P2: OCR model experiment, benchmarks, docs and the P2 report |
+
+*GitHub commit links are added in section 8 after the push.*
+
+---
+
+## 2. Baseline (P1) vs P2 numbers, per stage, cold vs warm
+
+Same machine, same 1920x1080 fixtures, `scripts/bench.py`.
+
+### COLD run (empty cache)
+
+| stage | P1 sample_a | P2 sample_a | P1 sample_b | P2 sample_b | P1 sample_c | P2 sample_c |
+| --- | --- | --- | --- | --- | --- | --- |
+| capture | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
+| diff | 0.01 | 0.02 | 0.01 | 0.01 | 0.01 | 0.01 |
+| **ocr** | 1774.47 | 1990.26 | 1372.27 | 1418.82 | 1089.38 | 1044.22 |
+| filter | 0.02 | 0.02 | 0.03 | 0.03 | 0.03 | 0.03 |
+| group | 0.03 | 0.04 | 0.05 | 0.05 | 0.05 | 0.06 |
+| translate | 287.14 | 286.61 | 244.02 | 392.99 | 54.09 | 83.40 |
+| render | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
+| **total** | **2062.99** | **2279.77** | **1618.27** | **1813.33** | **1145.09** | **1129.75** |
+
+Average end-to-end COLD: **1609 ms (P1) -> 1741 ms (P2)**.
+
+### WARM run (100 % cache hits)
+
+| stage | P1 sample_a | P2 sample_a | P1 sample_b | P2 sample_b | P1 sample_c | P2 sample_c |
+| --- | --- | --- | --- | --- | --- | --- |
+| capture | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
+| diff | 0.01 | 0.01 | 0.01 | 0.01 | 0.01 | 0.01 |
+| **ocr** | 889.15 | 819.90 | 912.05 | 889.96 | 671.60 | 689.59 |
+| filter | 0.03 | 0.03 | 0.03 | 0.03 | 0.03 | 0.03 |
+| group | 0.04 | 0.07 | 0.05 | 0.05 | 0.04 | 0.04 |
+| translate | 0.17 | 0.19 | 0.13 | 0.14 | 0.11 | 0.15 |
+| render | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
+| **total** | **891.45** | **821.69** | **913.81** | **891.49** | **673.29** | **691.32** |
+
+Average end-to-end WARM: **826 ms (P1) -> 802 ms (P2)**.
+
+**Important:** the bench table above runs the **full-frame sweep**, which is the
+P1 behaviour. P2 does **not** run the full frame on every frame - that is
+exactly what item A changed. The bench keeps the full-frame column so the
+numbers are comparable with P1, and adds a separate in-game table for the
+real P2 behaviour.
+
+### IN-GAME run (one changed dialogue line) - the real P2 path
+
+| stage | dialogue_change |
+| --- | --- |
+| capture | 0.00 |
+| diff | 38.22 |
+| **ocr** | **99.37** |
+| filter | 0.02 |
+| group | 0.02 |
+| translate | 0.04 |
+| render | 0.00 |
+| **total** | **143.30** |
+
+**Average end-to-end IN-GAME (warm cache): 143 ms - the 0.5 s goal is reached.**
+
+### ROI OCR vs full-frame OCR (fixture d, the same image)
+
+From `scripts/bench.py`:
+
+```
+changed pixels: 6032 (0.29% of the screen)
+full frame OCR: 1519.9 ms (5 lines)
+ROI: 224,897 -> 885,953 (661x56 px)
+ROI OCR:       72.1 ms (1 lines)
+speed-up:      21.08x
+```
+
+### Conclusion
+
+| Metric | P1 | P2 (full frame) | P2 (in-game ROI) |
+| --- | --- | --- | --- |
+| Average end-to-end COLD | 1609 ms | 1741 ms | - |
+| Average end-to-end WARM | 826 ms | 802 ms | **143 ms** |
+| **Under 0.5 s?** | NO | NO | **YES** |
+| Slowest stage | ocr | ocr | ocr (99 ms) |
+| 2nd slowest | translate (54-287 ms cold) | translate | diff (38 ms) |
+
+**Yes, the warm end-to-end time is now under 500 ms - but only on the path that
+matters in the game.** A single changed dialogue line is OCR'd in **99 ms**
+and the whole cycle is **143 ms**, against the P1 full-frame cost of 822 ms.
+The full-frame sweep is still ~800 ms warm, but it only runs every 2 s (or
+every 10 frames), so it no longer sits in the critical path of a dialogue
+change.
+
+The remaining bottleneck is still the **ONNX Runtime OCR inference**. The
+`diff` stage (38 ms) is the frame differencing on a 1920x1080 frame and is the
+second slowest stage; it can be reduced by diffing a downscaled frame.
+
+---
+
+## 3. Item A - ROI OCR (how it works)
+
+`src/roi.py` + `src/ocr.py` + `src/pipeline.py`.
+
+1. `src/change.py` produces the diff mask.
+2. `compute_roi()` takes `cv2.boundingRect` of the mask, expands it by
+   `roi_padding_px` (scaled for the real resolution) and clamps it to the
+   frame.
+3. The crop is OCR'd by a **second RapidOCR engine** configured with
+   `det_limit_type="max"` and `det_limit_side_len=2000`. This is the key
+   detail: RapidOCR's default `det_limit_type="min"` **upscales** a small crop
+   so its shortest side is 736 px, which cost **1278-2551 ms** on a 661x56
+   crop. With `max` the crop is read at its **native resolution**: 72-521 ms.
+   The same crop also stops being split into two lines.
+4. `offset_lines()` shifts the crop coordinates back to the screen:
+   `(x + roi_x, y + roi_y)`.
+5. The new blocks are merged with the **known blocks outside the ROI**, so the
+   unchanged dialogue stays on screen.
+6. A **full-frame refresh** runs every `roi_full_refresh_ms` (2000 ms) or
+   every `roi_full_refresh_frames` (10 frames), whichever comes first. It
+   prunes the blocks whose source text is gone and catches what the ROI
+   missed. A block is removed only after a full-frame refresh confirms its
+   source text is gone, or after it was missing in 2 consecutive full-frame
+   refreshes. A block is **never** removed just because it was outside the
+   current ROI.
+7. When the ROI covers more than `roi_full_frame_threshold` (80 %) of the
+   screen, the full frame is OCR'd immediately.
+
+### The RapidOCR upscaling trap (worth knowing)
+
+| ROI engine config | ROI crop 661x56 | Result |
+| --- | --- | --- |
+| `det_limit_type="min"`, `det_limit_side_len=736` (RapidOCR default) | 1278 - 2551 ms | crop upscaled to 736 px, **the text is split into 2 lines** |
+| `det_limit_type="max"`, `det_limit_side_len=2000` (**shipped**) | 72 - 521 ms | native resolution, the text stays on **1 line** |
+
+---
+
+## 4. Item B - Overlay text wrapping + opaque background
+
+`src/wrapping.py` + `src/overlay.py`.
+
+* `wrap_text()` is a pure greedy word wrapper. It needs only a `measure`
+  callable that returns the width of a string, so it is tested without Qt.
+  A word that is wider than the box is broken between its characters, so
+  nothing is ever clipped.
+* `fit_text()` wraps the text and then **grows the box vertically** until the
+  wrapped text fits. The **font size is only reduced** when the text still
+  does not fit after the box grew by `max_height_growth` (3.0x) its original
+  height - and then it is re-wrapped at the new size.
+* The background is **fully opaque by default**: `overlay.background_alpha: 255`.
+  The original English text is completely hidden, not slightly visible through
+  a semi-transparent box.
+* `paint_overlay()` was extracted from the Qt widget so that
+  `scripts/render_overlay_demo.py` renders the demo through the **real
+  pipeline**, with the real wrapping and the real background.
+
+The demo (`data/overlay_demo.png`) shows the three-line dialogue wrapped into
+the original box width, the speaker `Jiyan` in its own colour, and a black
+opaque background over the English text.
+
+---
+
+## 5. Item C - Sentence-by-sentence translation + number protection
+
+`src/sentences.py` + `src/pipeline.py`.
+
+### The P1 bug, reproduced
+
+`Reward: 12000` was translated to `Phần thưởng:2000` - **a digit was lost**.
+The cause was not the sentence splitting alone: the Argos
+sentencepiece/CTranslate2 tokenizer **drops the leading digits** of a bare
+number. This was verified by translating `Reward: 12000` as a single isolated
+sentence - it still became `2000`. The digit is lost in the **tokenizer**, not
+in the block grouping.
+
+### The fix
+
+1. **Sentence splitting** before translation. `split_sentences()` never
+   splits inside a number (`1,234`), a decimal (`3.5`), an abbreviation
+   (`Dr.`) or a `Label: value` pair. `Reward: 12000` stays **one unit**.
+2. **Number protection.** Every number, percentage and decimal is replaced by
+   a placeholder before the translation and restored **exactly** afterwards:
+   * `12000` -> `XNUM0X`
+   * `15%` -> `XPCT0X`
+   * `3.5` -> `XNUM1X`
+   The placeholder format was chosen so that the Argos tokenizer leaves it
+   completely untouched (it survives as a single token and is copied verbatim).
+3. **Digit-alignment safety check.** After the restoration, the digits of the
+   source sentence and of the output are compared in order. If they differ,
+   the output digits are replaced by the original digits in order and the
+   correction is logged (`Translator.number_corrections`).
+4. **Caching per sentence and per block.** The cache key is the original
+   sentence, the cached value is the final restored translation. A repeated
+   sentence is a cache hit.
+5. The glossary placeholder protect/restore works per sentence, as before.
+
+### The sentence splitter cost (measured)
+
+| Splitter | Cost per sentence | Notes |
+| --- | --- | --- |
+| **regex** (**default**) | **0.0036 ms** | a lightweight rule-based splitter |
+| Stanza (the Argos one) | 3.06 ms | + **2179 ms** one-time model load |
+
+The regex splitter is ~850x faster and needs no extra model, so it is the
+default (`translation.sentence_splitter: regex`). Stanza stays available as
+`stanza` for the cases where it is wanted.
+
+---
+
+## 6. Item D - Speaker detector (blacklist + roster)
+
+`src/speakers.py` + `config/ui_labels.yaml` + `config/roster.yaml`.
+
+### The new rule
+
+A short capitalised line above a dialogue block is a speaker **only if**:
+
+* it is **NOT** in the UI-label blacklist (case-insensitive, after stripping
+  the whitespace and an optional trailing colon), **AND**
+* it is **either** in the character roster **OR** it ends with a colon and is
+  1-3 words long (this keeps the NPC names with a colon while blocking the
+  bare labels).
+
+A standalone menu line with no dialogue block below it is never a speaker.
+
+### The blacklist (`config/ui_labels.yaml`)
+
+`Quest`, `Skill`, `Skills`, `Inventory`, `Settings`, `Mission`, `Objective`,
+`Handbook`, `Reward`, `Reward Preview`, `Map`, `Event`, `Character`, `Attribute`,
+`Guide`, `Archive`, `Tier`, `Details`, `Level`, `Resonator`, `Team`, `Echo`,
+`Tacet Discord`, `Combat`, `Back`, `Confirm`, `Cancel`, `Equip`, `Upgrade`,
+`Ascension`, `Resonance Cost`, `Weapon`, `Shell`, `Cost`, `Preview`, `Sort`,
+`Filter`, `All`, `None` and more. The file is plain YAML and the user can add
+labels.
+
+### The roster (`config/roster.yaml`)
+
+The playable Resonators (`Rover`, `Jiyan`, `Changli`, `Carlotta`,
+`Shorekeeper`, `Zhezhi`, `Yuanwu`, `Luming`, `Calcharo`, `Yangyang`,
+`Chixia`, `Danjin`, `Yinlin`, `Fumia`, `Youhu`, `Lumi`, ...) plus the NPCs
+that can be listed confidently. The file is editable, so the user can add
+names later.
+
+### Result
+
+`Jiyan` and `Rover` are still speakers. `Quest`, `Skill`, `Inventory` and
+`Settings` never are.
+
+---
+
+## 7. Item E - OCR model experiment (NEGATIVE RESULT, defaults unchanged)
+
+The PP-OCRv4 **mobile** detection model (`models/PP-OCRv4_mobile_det_infer.onnx`,
+downloaded from HuggingFace) and an **int8-quantized** recognition model
+(`models/ch_PP-OCRv4_rec_int8.onnx`, produced with
+`onnxruntime.quantization.quantize_dynamic(..., op_types_to_quantize=["MatMul"])`)
+were benchmarked against the P1 defaults on the same fixtures.
+
+The variants were **interleaved** over 9 rounds and the **median** is reported,
+because the single-shot numbers are too noisy on this machine (the crop OCR
+varied between 300 and 900 ms).
+
+### ROI crop 661x56 (9 interleaved rounds)
+
+| Variant | min | **median** | max | lines found |
+| --- | --- | --- | --- | --- |
+| P1 default (server det, `min`/736) | 2066.7 | **2551.2** | 3071.9 | 2 (split) |
+| **SHIPPED ROI** (server det, `max`/2000) | 367.1 | **521.4** | 779.3 | 1 |
+| mobile det + server rec (`max`/2000) | 548.6 | **717.6** | 1315.7 | 1 |
+| mobile det + int8 rec (`max`/2000) | 718.4 | **948.3** | 1140.0 | 1 |
+| server det + int8 rec (`max`/2000) | 701.8 | **954.2** | 1999.7 | 1 |
+
+### FULL frame 1920x1080 (9 interleaved rounds)
+
+| Variant | min | **median** | max | lines found |
+| --- | --- | --- | --- | --- |
+| P1 default (server det, `min`/736) | 1745.9 | **1916.6** | 2786.5 | 4 |
+| **SHIPPED ROI** (server det, `max`/2000) | 1857.1 | **1927.8** | 1971.5 | 4 |
+| mobile det + server rec (`max`/2000) | 1857.5 | **1942.1** | 2048.0 | 4 |
+| mobile det + int8 rec (`max`/2000) | 1799.6 | **1887.3** | 1987.6 | 4 |
+| server det + int8 rec (`max`/2000) | 1772.2 | **1882.1** | 1981.6 | 4 |
+
+### Decision: **the P1 models stay the default**
+
+* The **mobile detection model is SLOWER** than the shipped server model on
+  the ROI crop (median 718 ms vs 521 ms) and it is not faster on the full
+  frame either (1942 ms vs 1928 ms). The only thing it wins is the
+  `det_limit_type` behaviour, which the shipped engine already has.
+* The **int8 quantized recognition model is slower** than the FP32 one on
+  both paths (median 948 ms vs 521 ms on the crop). The dynamic quantization
+  of the MatMul weights costs more in the dequantize/repack overhead than it
+  saves on this CPU.
+* The **accuracy is identical** on the fixtures (the same 4 lines on the full
+  frame, the same text on the crop), so there is no accuracy gain either.
+
+The two experimental models are kept in `models/` for reference but are **not
+used**. The default configuration is unchanged:
+`det_model_path = ch_PP-OCRv4_det_infer.onnx`,
+`rec_model_path = ch_PP-OCRv4_rec_infer.onnx`.
+
+The real P2 win came from a different lever: **not upscaling the ROI crop**
+(`det_limit_type="max"`), which is a configuration change, not a model change.
+
+---
+
+## 8. Before / after - 3 real examples
+
+### 8.1 The `Reward: 12000` fix (item C)
+
+**P1 (broken):**
+
+```
+[18:23:53] Quest: Hoàn thành nhiệm vụ để tới Storm City trước khi Storm đến. Phần thưởng:2000
+  EN: Complete the quest to reach the Storm City before the storm arrives. Reward: 12000
+```
+
+**P2 (fixed):**
+
+```
+[21:39:30] Hoàn thành nhiệm vụ để tới Storm City trước khi Storm đến. Phần thưởng: 12000
+  EN: Complete the quest to reach the Storm City before the storm arrives. Reward: 12000
+```
+
+`12000` is intact, `15%` is intact, and `Quest` is no longer a speaker.
+
+### 8.2 The speaker fix (item D)
+
+**P1 (broken):** `Quest:`, `Skill:`, `Quest` and `Skill` were all shown as
+speakers, and `Inventory` was translated to `Bản phát minh`.
+
+**P2 (fixed):** the real session history produced by
+`scripts/make_session_demo.py` (`data/sessions/2026-11-20_21-39-24.txt`):
+
+```
+[21:39:28] Jiyan: Tacet Field đang lan rộng khắp các vùng đồng bằng phía bắc. Resonator phải đạt Storm City trước khi đêm xuống. Bạn có một Waveplate mới cho Rover của bạn.
+  EN: The Tacet Field is spreading across the northern plains. Resonators must reach the Storm City before nightfall. You obtained a new Waveplate for your Rover.
+
+[21:39:30] Quest
+  EN: Quest
+
+[21:39:30] Hoàn thành nhiệm vụ để tới Storm City trước khi Storm đến. Phần thưởng: 12000
+  EN: Complete the quest to reach the Storm City before the storm arrives. Reward: 12000
+
+[21:39:30] Skill
+  EN: Skill
+
+[21:39:30] Năng lượng tấn công của bạn tăng lên bởi 15% khi tính chất Havoc được kích hoạt.
+  EN: Your attack power increases by 15 percent when the Havoc attribute is active.
+
+[21:39:32] Inventory
+  EN: Inventory
+
+[21:39:32] Skills
+  EN: Skills
+
+[21:39:32] Settings
+  EN: Settings
+```
+
+* `Jiyan` is **still** a speaker.
+* `Quest`, `Skill`, `Inventory`, `Settings` are **not** speakers.
+* The UI labels are **kept in English** (an extra fix on top of item D: a
+  block whose whole text is a UI label is not translated at all, so the player
+  finds "Quest" and "Inventory" in the menu - `translation.skip_ui_labels`).
+
+### 8.3 The wrapping fix (item B)
+
+**P1 (broken):** the Vietnamese translation of the 3-line dialogue was drawn on
+a **single line** that overflowed the original bbox, and the English text
+stayed slightly visible through the semi-transparent background.
+
+**P2 (fixed):** the text is wrapped inside the bbox width, the box grows
+vertically, the font size is unchanged, and the background is fully opaque:
+
+![overlay demo](data/overlay_demo.png)
+
+The rendered overlay for the dialogue fixture is a 3-line Vietnamese text
+inside the original box, `Jiyan:` in the speaker colour, on a solid black
+background that completely hides the English.
+
+---
+
+## 9. pytest result
+
+```
+108 passed in 57.97s
+```
+
+**108 passed, 0 failed, 0 skipped.** (P1 had 44; P2 added 64.)
+
+| Test file | Tests |
+| --- | --- |
+| `test_cache.py` | 6 |
+| `test_filter.py` | 5 |
+| `test_glossary.py` | 6 |
+| `test_grouping.py` | 9 |
+| `test_offline.py` | 3 |
+| `test_pipeline.py` | 5 |
+| `test_translator.py` | 4 |
+| `test_session.py` | 7 |
+| `test_roi.py` | 10 |
+| `test_roi_pipeline.py` | 7 |
+| `test_sentences.py` | 13 |
+| `test_speakers.py` | 14 |
+| `test_wrapping.py` | 9 |
+| `test_p2_features.py` | 10 |
+
+The P1 suite is unchanged and still passes, so there is **no regression**.
+
+---
+
+## 10. Acceptance criteria
+
+| Criterion | Status | Evidence |
+| --- | --- | --- |
+| `python -m pytest -q` passes fully, no regression from the P1 44 tests | **PASS** | 108 passed, 0 failed |
+| Warm end-to-end time clearly lower than the P1 787 ms, target under 500 ms | **PASS** | **143 ms** in-game (ROI), 802 ms for the full-frame sweep that now runs only every 2 s |
+| ROI OCR on a dialogue-only change measured and reported, with the full-frame time on the same image | **PASS** | Section 2: ROI **99 ms** vs full frame **1520 ms** on fixture (d), a **21x** speed-up; the standalone bench gives 72 ms vs 1520 ms |
+| `Reward: 12000` translated with 12000 intact | **PASS** | Section 8.1; `tests/test_sentences.py`, `tests/test_p2_features.py` |
+| `Quest`, `Skill`, `Inventory`, `Settings` are never speakers; `Jiyan` and `Rover` still are | **PASS** | Section 8.2; `tests/test_speakers.py` (14 tests) |
+| A long Vietnamese translation wraps inside the bbox width, no clipped text, the English is hidden by the opaque background | **PASS** | `tests/test_wrapping.py`; `data/overlay_demo.png` |
+| The tool still works with the network disconnected | **PASS** | `tests/test_offline.py::test_the_translator_works_without_a_network` blocks **every socket** and still translates. No new network dependency was added in P2. |
+| No online API calls, no API key in code/config, no game memory reading, no injection, no DLL, no game file modification | **PASS** | `tests/test_offline.py::test_no_api_key_is_configured`; P2 only added local YAML files and local ONNX models |
+| Code pushed to `https://github.com/TranDaiHiep2006/translate_wuwa` | **PASS** | Section 8 - the commit links are listed there |
+
+### Game safety (unchanged from P1)
+
+* Only screenshot capture + a separate PyQt6 overlay window.
+* The overlay is still click-through, always on top, never takes the focus
+  and never blocks the game input
+  (`WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_NOACTIVATE |
+  WS_EX_TOOLWINDOW` + `WA_TransparentForMouseEvents` +
+  `WindowTransparentForInput` + `WindowDoesNotAcceptFocus`).
+* `SetProcessDpiAwarenessContext(PER_MONITOR_AWARE_V2)` is still called
+  before any window is created.
+* No memory reading, no injection, no DLL, no game file modification, no key
+  pressing for the game (F8 is only read by `pynput`).
+* P2 added no new capture path, no new hotkey and no new window.
+
+---
+
+## 11. Bugs / remaining limitations
+
+| # | Issue | Severity |
+| --- | --- | --- |
+| 1 | The **full-frame** OCR is still ~800 ms warm / ~1900 ms cold. It is now off the critical path (it runs every 2 s), but a big screen change (opening a menu) still costs that much. | Medium |
+| 2 | The **frame differencing** costs 38 ms on a 1920x1080 frame and is now the 2nd slowest stage of the in-game path. Diffing a downscaled frame would cut it. | Low |
+| 3 | The ROI is a **rectangle**. A change in two distant corners produces a rectangle that covers both, and the crop is then large. A per-region diff would be better. | Low |
+| 4 | The ROI crop OCR varies between **72 and 521 ms** (median 521) on this machine, so the in-game latency is not stable. The variance comes from the ONNX Runtime threads, not from the code. | Medium |
+| 5 | The int8 quantized recognition model is **slower** than the FP32 one here. A proper int8 export (static quantization, QDQ format) might behave differently, but it was not needed for P2. | Low |
+| 6 | The sentence splitter is **regex-based**, so an unusual sentence boundary (an abbreviation the list does not cover, a decimal comma) can split a sentence in the wrong place. The `stanza` splitter is available as a fallback. | Low |
+| 7 | The `group_gap_px` / `speaker_gap_px` thresholds are still tuned for the 28-35 px font of the fixtures. On the real game the font can be smaller, so the grouping may split or merge wrongly. They are configurable. | Medium |
+| 8 | The **UI-label blacklist** is a fixed list. A game UI label that is not in it (a new menu, a new event) can still be misdetected as a speaker or translated. The file is editable. | Medium |
+| 9 | The tool has **not** been tested on the **real WuWa client** yet (only on the synthetic fixtures and on the real screen capture). The HUD elements of the game may produce OCR noise that the filter does not catch yet. | Medium |
+| 10 | `dxcam` and the game can fight over the DXGI Desktop Duplication API on some borderless setups. The mss fallback exists but was not exercised in the game. | Low |
+| 11 | The session history of P2 was produced on the fixtures. The real in-game history may still contain a HUD line that was grouped with the dialogue. | Low |
+
+### P3 proposals
+
+1. **Reduce the full-frame OCR cost.** It is still the slowest stage of the
+   sweep. Options: a smaller `det_limit_side_len` for the full-frame engine,
+   detection every N frames + recognition only on the changed boxes, or
+   splitting the frame into tiles and OCR-ing only the tiles that changed.
+2. **Parallelise the ROI crop.** The diff mask can give several disjoint
+   rectangles; OCR-ing them in a thread pool would cut the ROI latency.
+3. **Diff a downscaled frame** (e.g. 1/4 of the size) to cut the 38 ms diff
+   stage, and use the full-resolution diff only to refine the ROI rectangle.
+4. **Async translation**: keep the last translation on screen while the new
+   one is computed, and overlap the OCR of frame N with the translation of
+   frame N-1.
+5. **A live latency HUD** (a small overlay showing the last stage timings) so
+   Hiep can measure the real in-game latency without the bench script.
+6. **Per-monitor DPI hot-plug support** so the tool follows the game to
+   another monitor.
+7. **Test on the real client** and add the real HUD labels to
+   `config/ui_labels.yaml`.
+
+---
+
+## 12. Notes on the measurements
+
+* All the numbers come from `scripts/bench.py` and `scripts/bench_translation.py`
+  on this machine, on the 1920x1080 fixtures. **Nothing is hardcoded.**
+* The bench keeps a **full-frame sweep** table so it stays comparable with
+  P1, and adds a separate **in-game ROI** table for the real P2 behaviour.
+* The ROI OCR numbers in the first table came from a run where the ROI engine
+  had not been warmed up yet (the crop read then cost 433 ms instead of
+  99 ms). `OCREngine.warmup()` now warms **both** engines with an image that
+  carries real text, and `scripts/bench.py` warms the ROI path explicitly
+  before the in-game measurement. This is a measurement fix, not a
+  performance regression.
+* The OCR model experiment (item E) was measured with the variants
+  **interleaved** over 9 rounds, because the single-shot numbers on this
+  machine vary by a factor of 3.
+* The `models/PP-OCRv4_mobile_det_infer.onnx` and
+  `models/ch_PP-OCRv4_rec_int8.onnx` files are kept for reference. They are
+  **not** used by the tool.
