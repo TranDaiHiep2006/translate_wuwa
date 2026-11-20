@@ -1028,6 +1028,26 @@ Every number is the **median of 7 runs** (the requirement is 5), with the
 minimum and the maximum next to it. Same machine, same 1920x1080 fixtures.
 Script: `scripts/bench_p3.py`.
 
+**A note on the run-to-run variance.** The whole benchmark was run **twice**
+on this machine and the numbers moved a little (the machine was doing
+nothing else in between, but the CPU thermal state and the ONNX Runtime
+thread scheduling are not perfectly reproducible). The tables below are from
+the **first** run; the second run gave:
+
+| Measurement | Run 1 (the tables below) | Run 2 |
+| --- | --- | --- |
+| The in-game ROI path (total) | 104.5 ms | 106.5 ms |
+| The tiled refresh (total) | 478.3 ms | 455.9 ms |
+| The tiled refresh (OCR stage) | 469.1 ms | 445.7 ms |
+| The diff stage (ROI path) | 6.9 ms | 5.8 ms |
+| The full-frame two-step read (scale 0.5) | 367.1 ms | 472.7 ms |
+| Visible on screen (async) | 113.2 ms | 114.6 ms |
+
+**Both runs meet every target**, and the report quotes the **first** run
+consistently, so no number is cherry-picked. The one that moves the most is
+the standalone full-frame read (367 -> 473 ms), which is a single isolated
+measurement; in the pipeline the same read is 445-469 ms.
+
 ### 3.1 P2 vs P3, per stage
 
 The table below is the **same metric as P2** (the full-frame sweep), so the
