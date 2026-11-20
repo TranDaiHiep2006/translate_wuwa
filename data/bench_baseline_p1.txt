@@ -1,0 +1,112 @@
+2026-11-20 19:05:38 WARNING: Language en package default expects mwt, which has been added
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+
+=== Capture backend benchmark (real screen, 30 grabs) ===
+backend     ok          avg ms  error
+mss         yes          66.07  
+dxcam       yes           3.48  
+
+=== Translation engine benchmark (10 game-style sentences) ===
+
+Loading weights:   0%|          | 0/258 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 258/258 [00:00<00:00, 22360.84it/s]
+[transformers] Both `max_new_tokens` (=256) and `max_length`(=512) seem to have been set. `max_new_tokens` will take precedence. Please refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/text_generation)
+[transformers] Both `max_new_tokens` (=256) and `max_length`(=512) seem to have been set. `max_new_tokens` will take precedence. Please refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/text_generation)
+[transformers] Both `max_new_tokens` (=256) and `max_length`(=512) seem to have been set. `max_new_tokens` will take precedence. Please refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/text_generation)
+[transformers] Both `max_new_tokens` (=256) and `max_length`(=512) seem to have been set. `max_new_tokens` will take precedence. Please refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/text_generation)
+[transformers] Both `max_new_tokens` (=256) and `max_length`(=512) seem to have been set. `max_new_tokens` will take precedence. Please refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/text_generation)
+[transformers] Both `max_new_tokens` (=256) and `max_length`(=512) seem to have been set. `max_new_tokens` will take precedence. Please refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/text_generation)
+[transformers] Both `max_new_tokens` (=256) and `max_length`(=512) seem to have been set. `max_new_tokens` will take precedence. Please refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/text_generation)
+[transformers] Both `max_new_tokens` (=256) and `max_length`(=512) seem to have been set. `max_new_tokens` will take precedence. Please refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/text_generation)
+[transformers] Both `max_new_tokens` (=256) and `max_length`(=512) seem to have been set. `max_new_tokens` will take precedence. Please refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/text_generation)
+[transformers] Both `max_new_tokens` (=256) and `max_length`(=512) seem to have been set. `max_new_tokens` will take precedence. Please refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/text_generation)
+engine    ok         avg ms/sentence
+argos     yes                 337.76
+marian    yes                 335.58
+
+--- argos outputs ---
+  EN: Rover, the Tacet Field is spreading across the northern plains.
+  VI: Rover, Cánh đồng Tacet đang lan rộng khắp vùng đồng bằng phía bắc.
+  EN: Resonators are the only ones who can enter the Tacet Discord.
+  VI: Những người cộng hưởng là những người duy nhất có thể tham gia Tacet Discord.
+  EN: You have obtained a new Waveplate for your Rover.
+  VI: Bạn đã có một tấm bảng mới cho Rover của bạn.
+  EN: The Tacet Mark on your shoulder is resonating with the Inferno attribute.
+  VI: Dấu Tact Mark trên vai anh đang cộng hưởng với đặc tính Inferno.
+  EN: Complete the quest to reach the Storm City before the storm arrives.
+  VI: Hoàn thành sứ mệnh đến được Storm City trước khi bão đến.
+  EN: Your attack power increases by 15% when the Havoc attribute is active.
+  VI: Năng lượng tấn công tăng 15% khi tính năng Havoc hoạt động.
+  EN: The Shorekeeper has granted you a blessing for the next expedition.
+  VI: Người giữ cửa đã ban phước cho chuyến đi tiếp theo.
+  EN: Head to the supply station to exchange your tokens for rare materials.
+  VI: Đến trạm tiếp tế để trao đổi vật liệu hiếm.
+  EN: Jiyan will join your party and unlock the gliding skill.
+  VI: Jiyan sẽ gia nhập đảng của anh và mở khóa kỹ năng bay lượn.
+  EN: The Echo has been recorded. Replay it to learn more about the Tacet Discord.
+  VI: Echo đã được ghi âm. Hãy phát lại nó để tìm hiểu thêm về dự án Tacet Discord.
+
+--- marian outputs ---
+  EN: Rover, the Tacet Field is spreading across the northern plains.
+  VI: Rover, Tacet Field đang đi qua vùng thượng lưu phía bắc.
+  EN: Resonators are the only ones who can enter the Tacet Discord.
+  VI: Các đối tác là những người duy nhất có thể tham gia vào Hiệp ước Vô thức.
+  EN: You have obtained a new Waveplate for your Rover.
+  VI: Bạn đã có được một bản ghi mới cho căn phòng của bạn.
+  EN: The Tacet Mark on your shoulder is resonating with the Inferno attribute.
+  VI: Vết sẹo trên vai anh đang được cộng lại với tổ chức Vô thần.
+  EN: Complete the quest to reach the Storm City before the storm arrives.
+  VI: Hoàn thành cuộc hành trình đến Thành bão trước khi cơn bão đến.
+  EN: Your attack power increases by 15% when the Havoc attribute is active.
+  VI: Năng lượng tấn công của bạn tăng 15% khi tổ tiên Havoc được kích hoạt.
+  EN: The Shorekeeper has granted you a blessing for the next expedition.
+  VI: Người giữ vườn đã ban cho anh một ân phước cho chuyến đi tiếp theo.
+  EN: Head to the supply station to exchange your tokens for rare materials.
+  VI: Đến trạm tiếp tế để trao đổi vật dụng của anh với vật liệu hiếm.
+  EN: Jiyan will join your party and unlock the gliding skill.
+  VI: Quý Yên sẽ tham gia vào bữa tiệc của các ngươi và giành chiến thắng.
+  EN: The Echo has been recorded. Replay it to learn more about the Tacet Discord.
+  VI: Hãy nhớ lại để tìm hiểu thêm về cách giải mã.
+
+=== Pipeline benchmark ===
+Screen resolution used: 1920x1080 (from the fixture images)
+
+Model load: translation engine 0 ms, OCR engine (first inference) 1862 ms
+
+COLD run (empty cache)
+------------------------------------------------------------------------
+stage         sample_a_dialogue  sample_b_quest   sample_c_menu
+------------------------------------------------------------------------
+capture                   0.00            0.00            0.00
+diff                      0.01            0.01            0.01
+ocr                    1774.47         1372.27         1089.38
+filter                    0.02            0.03            0.03
+group                     0.03            0.05            0.05
+translate               287.14          244.02           54.09
+render                    0.00            0.00            0.00
+total                  2062.99         1618.27         1145.09
+------------------------------------------------------------------------
+
+WARM run (100% cache hits)
+------------------------------------------------------------------------
+stage         sample_a_dialogue  sample_b_quest   sample_c_menu
+------------------------------------------------------------------------
+capture                   0.00            0.00            0.00
+diff                      0.01            0.01            0.01
+ocr                     889.15          912.05          671.60
+filter                    0.03            0.03            0.03
+group                     0.04            0.05            0.04
+translate                 0.17            0.13            0.11
+render                    0.00            0.00            0.00
+total                   891.45          913.81          673.29
+------------------------------------------------------------------------
+
+=== Conclusion ===
+Average end-to-end COLD: 1609 ms
+Average end-to-end WARM: 826 ms
+Slowest stage (cold): ocr
+Slowest stage (warm): ocr
+Under 0.5 s end-to-end (cold): NO  [1609 ms]
+Under 0.5 s end-to-end (warm): NO  [826 ms]
+
+Done.

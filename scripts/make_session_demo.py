@@ -25,6 +25,7 @@ from src.glossary import Glossary
 from src.ocr import OCREngine
 from src.pipeline import Pipeline, Translator
 from src.session import SessionLog
+from src.speakers import SpeakerVocabulary
 from src.translator import create_engine
 
 
@@ -35,13 +36,27 @@ def main() -> int:
     config = load_config()
     config.debounce_ms = 0
 
-    cache = TranslationCache(config.cache_db_path)
+    # A dedicated cache, so the demo always shows the real translations
+    # instead of the cache hits of the previous runs.
+    cache = TranslationCache(PROJECT_ROOT / "data" / "demo_cache.db")
     glossary = Glossary.from_file(config.glossary_path)
     engine = create_engine(config.translation.engine, device=config.translation.device)
     engine.load()
-    translator = Translator(engine, cache, glossary)
+    vocabulary = SpeakerVocabulary.from_files(
+        config.speaker.ui_labels_path, config.speaker.roster_path
+    )
+    translator = Translator(
+        engine,
+        cache,
+        glossary,
+        split_sentences=config.translation.split_sentences,
+        vocabulary=vocabulary,
+        skip_ui_labels=config.translation.skip_ui_labels,
+    )
     ocr = OCREngine(device=config.translation.device)
-    pipeline = Pipeline(config, ocr_engine=ocr, translator=translator)
+    pipeline = Pipeline(
+        config, ocr_engine=ocr, translator=translator, vocabulary=vocabulary
+    )
 
     session_log = SessionLog(config.sessions_dir)
     path = session_log.start()
@@ -51,6 +66,8 @@ def main() -> int:
         "sample_a_dialogue.png",
         "sample_b_quest.png",
         "sample_c_menu.png",
+        "sample_f_reward.png",
+        "sample_g_ui_menu.png",
     ]
     for name in fixtures:
         image = cv2.imread(str(PROJECT_ROOT / "tests" / "fixtures" / name))

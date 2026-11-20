@@ -150,6 +150,19 @@ def run_pipeline_bench() -> None:
     print_table(f"COLD run (empty cache)", cold_rows)
     print_table("WARM run (100% cache hits)", warm_rows)
 
+    # --- in-game run: a dialogue change read through the ROI ---------------
+    roi_rows = bench_roi_pipeline(config, ocr)
+
+    if roi_rows:
+        print_table("IN-GAME run (a dialogue-only change, ROI OCR)", roi_rows)
+        roi_avg = sum(r["total"] for r in roi_rows.values()) / len(roi_rows)
+        print(f"Average end-to-end IN-GAME (warm cache): {roi_avg:.0f} ms")
+        print(
+            "Under 0.5 s end-to-end (in-game): "
+            + ("YES" if roi_avg < 500 else "NO")
+            + f"  [{roi_avg:.0f} ms]"
+        )
+
     print("\n=== Conclusion ===")
     stages_only = [s for s in STAGES if s != "total"]
     slowest_cold = max(
@@ -178,10 +191,105 @@ def run_pipeline_bench() -> None:
     )
 
 
+def bench_roi_pipeline(config, ocr) -> dict:
+    """Measure the pipeline when only a dialogue line changed.
+
+    This is the real in-game case: the frame is read through the ROI, so the
+    OCR only sees the changed part of the screen.
+    """
+    import cv2
+
+    base_path = FIXTURE_DIR / "sample_d_roi_base.png"
+    changed_path = FIXTURE_DIR / "sample_d_roi_changed.png"
+    if not base_path.exists() or not changed_path.exists():
+        return {}
+
+    base = cv2.imread(str(base_path))
+    changed = cv2.imread(str(changed_path))
+
+    rows: dict[str, dict[str, float]] = {}
+    pipeline = Pipeline(config, ocr_engine=ocr)
+    # The first frame fills the known blocks, the second one is the change.
+    pipeline.process_frame(frame_from_image(base))
+    # The ROI path is warmed up too (the crop read is a second ONNX session).
+    ocr.read_roi(changed[897:953, 224:885])
+    result = pipeline.process_frame(frame_from_image(changed))
+    rows["dialogue_change"] = result.timings.as_dict()
+    print(f"\nROI action (dialogue_change): {result.roi_action} {result.roi_rect}")
+    return rows
+
+
+def bench_roi_vs_full() -> None:
+    """Compare the ROI OCR with the full frame OCR on the same images.
+
+    The ROI is the rectangle of the pixels that changed between the two
+    frames of the fixture (d).
+    """
+    import cv2
+
+    base_path = FIXTURE_DIR / "sample_d_roi_base.png"
+    changed_path = FIXTURE_DIR / "sample_d_roi_changed.png"
+    if not base_path.exists() or not changed_path.exists():
+        print("\n(no ROI fixture - run scripts/make_fixtures.py first)")
+        return
+
+    config = load_config()
+    base = cv2.imread(str(base_path))
+    changed = cv2.imread(str(changed_path))
+    ocr = OCREngine(device=config.translation.device)
+    ocr.warmup()
+
+    from src.change import frame_diff
+    from src.roi import ROI_CROP, compute_roi, offset_lines
+
+    diff = frame_diff(changed, base, threshold=config.diff_threshold)
+    roi = compute_roi(
+        diff.diff_mask,
+        padding=int(round(config.scale(config.roi_padding_px, base.shape[0]))),
+        width=base.shape[1],
+        height=base.shape[0],
+        min_area=int(round(config.roi_min_area * (base.shape[0] / 1080.0) ** 2)),
+        full_frame_threshold=config.roi_full_frame_threshold,
+    )
+
+    print("\n=== ROI OCR vs full frame OCR (fixture d) ===")
+    print(f"changed pixels: {roi.changed_area} ({roi.changed_ratio:.2%} of the screen)")
+
+    # -- full frame --------------------------------------------------------
+    ocr.read(base)  # warm up
+    start = time.perf_counter()
+    full_lines = ocr.read(changed)
+    full_ms = (time.perf_counter() - start) * 1000.0
+
+    print(f"full frame OCR: {full_ms:.1f} ms ({len(full_lines)} lines)")
+
+    if roi.action != ROI_CROP or roi.roi is None:
+        print(f"the ROI was not used ({roi.action}: {roi.reason})")
+        return
+
+    x1, y1, x2, y2 = roi.roi
+    crop = changed[y1:y2, x1:x2]
+    print(f"ROI: {x1},{y1} -> {x2},{y2} ({x2 - x1}x{y2 - y1} px)")
+
+    ocr.read_roi(crop)  # warm up
+    start = time.perf_counter()
+    crop_lines = ocr.read_roi(crop)
+    roi_ms = (time.perf_counter() - start) * 1000.0
+    moved = offset_lines(crop_lines, x1, y1)
+
+    print(f"ROI OCR:       {roi_ms:.1f} ms ({len(moved)} lines)")
+    print(f"speed-up:      {full_ms / roi_ms:.2f}x")
+
+    print("\nlines found by the ROI (with the full-screen coordinates):")
+    for line in moved:
+        print(f"   {line.bbox}  {line.text}")
+
+
 def main() -> int:
     """Run every benchmark."""
     bench_capture()
     bench_engines()
+    bench_roi_vs_full()
     run_pipeline_bench()
     print("\nDone.")
     return 0

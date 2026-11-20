@@ -1,0 +1,62 @@
+2026-11-20 21:56:11 WARNING: Language en package default expects mwt, which has been added
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+
+Loading weights:   0%|          | 0/258 [00:00<?, ?it/s]
+Loading weights: 100%|██████████| 258/258 [00:00<00:00, 16255.53it/s]
+[transformers] Both `max_new_tokens` (=256) and `max_length`(=512) seem to have been set. `max_new_tokens` will take precedence. Please refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/text_generation)
+[transformers] Both `max_new_tokens` (=256) and `max_length`(=512) seem to have been set. `max_new_tokens` will take precedence. Please refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/text_generation)
+[transformers] Both `max_new_tokens` (=256) and `max_length`(=512) seem to have been set. `max_new_tokens` will take precedence. Please refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/text_generation)
+[transformers] Both `max_new_tokens` (=256) and `max_length`(=512) seem to have been set. `max_new_tokens` will take precedence. Please refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/text_generation)
+[transformers] Both `max_new_tokens` (=256) and `max_length`(=512) seem to have been set. `max_new_tokens` will take precedence. Please refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/text_generation)
+[transformers] Both `max_new_tokens` (=256) and `max_length`(=512) seem to have been set. `max_new_tokens` will take precedence. Please refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/text_generation)
+[transformers] Both `max_new_tokens` (=256) and `max_length`(=512) seem to have been set. `max_new_tokens` will take precedence. Please refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/text_generation)
+[transformers] Both `max_new_tokens` (=256) and `max_length`(=512) seem to have been set. `max_new_tokens` will take precedence. Please refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/text_generation)
+[transformers] Both `max_new_tokens` (=256) and `max_length`(=512) seem to have been set. `max_new_tokens` will take precedence. Please refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/text_generation)
+[transformers] Both `max_new_tokens` (=256) and `max_length`(=512) seem to have been set. `max_new_tokens` will take precedence. Please refer to the documentation for more information. (https://huggingface.co/docs/transformers/main/en/main_classes/text_generation)
+engine    ok         avg ms/sentence    total ms
+argos     yes                 334.29     3342.92
+marian    yes                 405.44     4054.44
+
+--- argos ---
+ 1. EN: Rover, the Tacet Field is spreading across the northern plains.
+    VI: Rover, Cánh đồng Tacet đang lan rộng khắp vùng đồng bằng phía bắc.
+ 2. EN: Resonators are the only ones who can enter the Tacet Discord.
+    VI: Những người cộng hưởng là những người duy nhất có thể tham gia Tacet Discord.
+ 3. EN: You have obtained a new Waveplate for your Rover.
+    VI: Bạn đã có một tấm bảng mới cho Rover của bạn.
+ 4. EN: The Tacet Mark on your shoulder is resonating with the Inferno attribute.
+    VI: Dấu Tact Mark trên vai anh đang cộng hưởng với đặc tính Inferno.
+ 5. EN: Complete the quest to reach the Storm City before the storm arrives.
+    VI: Hoàn thành sứ mệnh đến được Storm City trước khi bão đến.
+ 6. EN: Your attack power increases by 15% when the Havoc attribute is active.
+    VI: Năng lượng tấn công tăng 15% khi tính năng Havoc hoạt động.
+ 7. EN: The Shorekeeper has granted you a blessing for the next expedition.
+    VI: Người giữ cửa đã ban phước cho chuyến đi tiếp theo.
+ 8. EN: Head to the supply station to exchange your tokens for rare materials.
+    VI: Đến trạm tiếp tế để trao đổi vật liệu hiếm.
+ 9. EN: Jiyan will join your party and unlock the gliding skill.
+    VI: Jiyan sẽ gia nhập đảng của anh và mở khóa kỹ năng bay lượn.
+10. EN: The Echo has been recorded. Replay it to learn more about the Tacet Discord.
+    VI: Echo đã được ghi âm. Hãy phát lại nó để tìm hiểu thêm về dự án Tacet Discord.
+
+--- marian ---
+ 1. EN: Rover, the Tacet Field is spreading across the northern plains.
+    VI: Rover, Tacet Field đang đi qua vùng thượng lưu phía bắc.
+ 2. EN: Resonators are the only ones who can enter the Tacet Discord.
+    VI: Các đối tác là những người duy nhất có thể tham gia vào Hiệp ước Vô thức.
+ 3. EN: You have obtained a new Waveplate for your Rover.
+    VI: Bạn đã có được một bản ghi mới cho căn phòng của bạn.
+ 4. EN: The Tacet Mark on your shoulder is resonating with the Inferno attribute.
+    VI: Vết sẹo trên vai anh đang được cộng lại với tổ chức Vô thần.
+ 5. EN: Complete the quest to reach the Storm City before the storm arrives.
+    VI: Hoàn thành cuộc hành trình đến Thành bão trước khi cơn bão đến.
+ 6. EN: Your attack power increases by 15% when the Havoc attribute is active.
+    VI: Năng lượng tấn công của bạn tăng 15% khi tổ tiên Havoc được kích hoạt.
+ 7. EN: The Shorekeeper has granted you a blessing for the next expedition.
+    VI: Người giữ vườn đã ban cho anh một ân phước cho chuyến đi tiếp theo.
+ 8. EN: Head to the supply station to exchange your tokens for rare materials.
+    VI: Đến trạm tiếp tế để trao đổi vật dụng của anh với vật liệu hiếm.
+ 9. EN: Jiyan will join your party and unlock the gliding skill.
+    VI: Quý Yên sẽ tham gia vào bữa tiệc của các ngươi và giành chiến thắng.
+10. EN: The Echo has been recorded. Replay it to learn more about the Tacet Discord.
+    VI: Hãy nhớ lại để tìm hiểu thêm về cách giải mã.
