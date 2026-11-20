@@ -398,13 +398,16 @@ data/overlay_demo.png  regenerated with the wrapped text and the opaque backgrou
 
 | # | Hash | Message |
 | --- | --- | --- |
-| 1 | `PENDING` | P2: ROI OCR engine, ROI pipeline branch and block merging |
-| 2 | `PENDING` | P2: overlay text wrapping and a fully opaque background |
-| 3 | `PENDING` | P2: sentence-by-sentence translation with number protection |
-| 4 | `PENDING` | P2: UI-label blacklist and character roster for the speaker detector |
-| 5 | `PENDING` | P2: OCR model experiment, benchmarks, docs and the P2 report |
+| 1 | `de0ddde` | P2: ROI OCR, overlay wrapping, sentence translation and the speaker detector |
+| 2 | `7721464` | P2: the benchmarks, the demo scripts and the regenerated overlay demo |
+| 3 | `d839192` | P2: the documentation and the P2 report |
 
-*GitHub commit links are added in section 8 after the push.*
+* Local HEAD: `d839192`
+* GitHub: <https://github.com/TranDaiHiep2006/translate_wuwa/commit/d839192>
+  * `2cfd167..de0ddde  main -> main`
+  * `de0ddde..7721464  main -> main`
+  * `7721464..d839192  main -> main`
+* **The push succeeded** for all three commits.
 
 ---
 
@@ -821,7 +824,7 @@ The P1 suite is unchanged and still passes, so there is **no regression**.
 | A long Vietnamese translation wraps inside the bbox width, no clipped text, the English is hidden by the opaque background | **PASS** | `tests/test_wrapping.py`; `data/overlay_demo.png` |
 | The tool still works with the network disconnected | **PASS** | `tests/test_offline.py::test_the_translator_works_without_a_network` blocks **every socket** and still translates. No new network dependency was added in P2. |
 | No online API calls, no API key in code/config, no game memory reading, no injection, no DLL, no game file modification | **PASS** | `tests/test_offline.py::test_no_api_key_is_configured`; P2 only added local YAML files and local ONNX models |
-| Code pushed to `https://github.com/TranDaiHiep2006/translate_wuwa` | **PASS** | Section 8 - the commit links are listed there |
+| Code pushed to `https://github.com/TranDaiHiep2006/translate_wuwa` | **PASS** | `d839192` on `origin/main` - <https://github.com/TranDaiHiep2006/translate_wuwa/commit/d839192> |
 
 ### Game safety (unchanged from P1)
 
