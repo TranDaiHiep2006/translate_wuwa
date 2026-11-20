@@ -1,0 +1,39 @@
+# Terms that must stay in English (WuWa / generic game vocabulary).
+# Values are the canonical display form. The engine replaces every occurrence
+# with a placeholder before translating and restores it afterwards.
+#
+# "aliases" lets a term be matched by different surface forms
+# (e.g. "Tacet Discords" -> "Tacet Field" in the WuWa lore).
+
+terms:
+  Rover: Rover
+  Resonator: Resonator
+  Tacet Field: Tacet Field
+  Tacet Discord: Tacet Discord
+  Waveplate: Waveplate
+  Tacet Mark: Tacet Mark
+  Storm: Storm
+  Storm City: Storm City
+  Inferno: Inferno
+  Glacio: Glacio
+  Electro: Electro
+  Fusion: Fusion
+  Havoc: Havoc
+  Jinhsi: Jinhsi
+  Calcharo: Calcharo
+  Yangyang: Yangyang
+  Sanada: Sanada
+  Changli: Changli
+  Encore: Encore
+  Verina: Verina
+  Zhezhi: Zhezhi
+  Jiyan: Jiyan
+  Shorekeeper: Shorekeeper
+  Cartethyia: Cartethyia
+
+aliases:
+  "resonators": Resonator
+  "tacet fields": Tacet Field
+  "tacet discords": Tacet Discord
+  "waveplates": Waveplate
+  "the rover": Rover

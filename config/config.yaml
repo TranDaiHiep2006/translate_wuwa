@@ -1,0 +1,67 @@
+# WuWa Screen Translation Tool - configuration
+# All resolution-dependent values are computed at runtime; do NOT hardcode pixels.
+
+source_lang: en
+target_lang: vi
+
+# How often the screen is captured (ms). Lower = faster reaction, more CPU.
+poll_ms: 200
+
+# Frame differencing: a frame is considered "changed" when the fraction of
+# changed pixels exceeds this threshold (0..1).
+diff_threshold: 0.002
+
+# Debounce: a text block must stay unchanged for this long (ms) before it is
+# translated. Prevents translating text that is still fading in / typing out.
+debounce_ms: 120
+
+# OCR results below this confidence are dropped.
+ocr_conf_min: 0.5
+
+# Minimum number of characters for a text line to be considered.
+min_line_chars: 2
+
+# Vertical gap (in pixels, at 1080p reference height) below which two OCR
+# lines are grouped into the same paragraph block.
+group_gap_px: 18
+
+# Vertical gap (scaled px) below which a short line is considered a speaker
+# name sitting directly above the dialogue block.
+speaker_gap_px: 120
+
+# Maximum words in a line that may be a speaker name.
+speaker_max_words: 3
+
+overlay:
+  font_family: "Segoe UI"
+  font_size: 20          # reference size at 1080p height; scaled at runtime
+  text_color: "#FFD54F"
+  background_color: "#000000"
+  background_alpha: 140  # 0-255
+  padding: 6
+  margin: 10
+  show_status: true     # show TRANSLATING / OFF in the screen corner
+  status_font_size: 16
+
+hotkey: F8
+
+# Translation engine: "argos" or "marian". Selected by the P1 benchmark.
+translation:
+  engine: argos
+  device: cpu           # cpu | cuda  (P1 runs on CPU: the game owns the GPU)
+  batch_size: 8
+  max_workers: 1
+
+capture:
+  # Preferred backend: "auto" tries dxcam first then falls back to mss.
+  backend: auto
+  monitor: 0            # index of the monitor to capture (0 = primary)
+
+cache:
+  db_path: data/cache.db
+
+sessions:
+  dir: data/sessions
+
+glossary:
+  path: config/glossary.yaml

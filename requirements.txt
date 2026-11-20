@@ -1,0 +1,31 @@
+# WuWa Screen Translation Tool - Windows / Python 3.11
+# Install with:  python -m pip install -r requirements.txt
+
+# --- capture ---
+mss==10.2.0
+dxcam==0.3.0
+
+# --- OCR (PP-OCR / ONNX Runtime, CPU) ---
+rapidocr-onnxruntime==1.4.4
+onnxruntime==1.32.0
+opencv-python==5.1.0.95
+
+# --- overlay ---
+PyQt6==6.12.1
+pywin32==311
+
+# --- hotkey / config / images ---
+pynput==1.8.2
+PyYAML==6.0.3
+pillow==12.1.0
+numpy==2.4.4
+
+# --- translation (offline) ---
+argostranslate==1.11.0
+ctranslate2==4.9.0
+sentencepiece==0.2.3
+transformers==5.23.0
+torch==2.15.0
+
+# --- tests ---
+pytest==9.0.1

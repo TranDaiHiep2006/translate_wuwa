@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.venv/
+venv/
+env/
+
+# Editors / OS
+.vscode/
+.idea/
+Thumbs.db
+desktop.ini
+
+# Models downloaded at runtime (they are large, they are not in git)
+models/
+
+# Runtime data
+data/*.db
+data/*.db-wal
+data/*.db-shm
+data/sessions/
+data/cache.db
+bench_cache.db
+
+# Logs
+*.log
