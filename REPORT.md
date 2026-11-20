@@ -16,11 +16,12 @@
 | 2 | `c30f235` | P1: offline Stanza patch, offline tests, demo scripts, final measurements |
 | 3 | `96e568e` | P1: add REPORT.md with the measured results |
 
-* Local HEAD: `96e568e`
-* GitHub: <https://github.com/TranDaiHiep2006/translate_wuwa/commit/96e568e>
-* **The push succeeded** for all three commits:
+* Local HEAD: `ad55880` (the commit that updates this section 1; the P1 work itself ends at `96e568e`)
+* GitHub: <https://github.com/TranDaiHiep2006/translate_wuwa/commit/ad55880>
+* **The push succeeded** for all commits:
   * `74946b4..c30f235  main -> main`
   * `c30f235..96e568e  main -> main`
+  * `96e568e..ad55880  main -> main`
 
 ### Files created (38 tracked files)
 
@@ -283,7 +284,7 @@ written exactly once.
 | pytest passes fully, `scripts/bench.py` runs and prints real numbers | **PASS** | 44 passed; the bench output is in section 5 |
 | Works with the network disconnected | **PASS** | `src/offline.py` patches Stanza to `DownloadMethod.REUSE_RESOURCES`; `tests/test_offline.py::test_the_translator_works_without_a_network` blocks **every socket** and still translates. Without this patch Stanza tried to fetch `resources_1.10.0.json` from `raw.githubusercontent.com`. |
 | No online API calls, no API key in code/config | **PASS** | `tests/test_offline.py::test_no_api_key_is_configured` greps the code and the config |
-| Code pushed to GitHub | **PASS** | `c30f235` on `origin/main` |
+| Code pushed to GitHub | **PASS** | `96e568e` on `origin/main` (plus the follow-up commit `ad55880` that updates this section 1) |
 
 ### Game safety
 
