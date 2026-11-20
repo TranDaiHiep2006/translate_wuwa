@@ -67,6 +67,26 @@ class TranslationConfig:
 
 
 @dataclass
+class HUDConfig:
+    """Live latency HUD options (item E of P3).
+
+    The HUD is a diagnostic overlay: it shows the stage timings and the
+    running median, never any translated text. It is OFF by default and is
+    toggled with ``F9``.
+    """
+
+    enabled: bool = False
+    hotkey: str = "F9"
+    # Number of cycles kept for the running median.
+    history: int = 10
+    font_size: int = 14
+    text_color: str = "#8CFF8C"
+    background_color: str = "#101010"
+    background_alpha: int = 200
+    margin: int = 10
+
+
+@dataclass
 class SpeakerConfig:
     """Speaker detection options.
 
@@ -99,10 +119,23 @@ class Config:
     debounce_ms: int = 120
     ocr_conf_min: float = 0.5
     min_line_chars: int = 2
-    group_gap_px: int = 28
-    speaker_gap_px: int = 60
+    group_gap_px: int = 18
+    speaker_gap_px: int = 120
     speaker_max_words: int = 3
     hotkey: str = "F8"
+
+    # -- adaptive grouping (item D of P3) ---------------------------------
+    # The grouping thresholds are derived from the measured font height of the
+    # current frame instead of being fixed pixel values, so the grouping also
+    # works on a font that is smaller than the one of the fixtures.
+    adaptive_grouping: bool = True
+    # group_gap_px = font_height * group_gap_ratio
+    group_gap_ratio: float = 0.55
+    # speaker_gap_px = font_height * speaker_gap_ratio
+    speaker_gap_ratio: float = 3.0
+    # Below this many detected lines the measured font height is not trusted
+    # and the reference 1080p values are used instead.
+    adaptive_min_lines: int = 2
 
     # -- ROI OCR -----------------------------------------------------------
     # Only the changed part of the screen is read by the OCR.
@@ -119,10 +152,93 @@ class Config:
     # ... or after this many frames, whichever comes first.
     roi_full_refresh_frames: int = 10
 
+    # -- per-region ROI (item A of P3) -------------------------------------
+    # The changed area is split into several disjoint rectangles instead of
+    # one big union rectangle, so a change in two distant corners does not
+    # cost a crop that covers the whole screen.
+    roi_regions_enabled: bool = True
+    # A region smaller than this (in pixels, scaled) is merged into its
+    # nearest neighbour instead of being read on its own.
+    roi_region_min_area: int = 1200
+    # Maximum number of regions that are read in one frame.
+    roi_max_regions: int = 4
+    # Number of worker threads used to read the regions in parallel.
+    roi_workers: int = 3
+    # Two components of the diff mask that are on the same line and closer
+    # than this (reference pixels at 1080p) belong to the same region. This
+    # is what keeps a text line in one piece: the diff of a changed line is
+    # made of one component per glyph.
+    roi_region_merge_gap: int = 200
+    # A region is expanded horizontally to at least this width (reference
+    # pixels at 1080p). The diff of a changed line only covers the glyphs
+    # that really changed, so the crop has to be wide enough for the OCR to
+    # read the whole line.
+    roi_region_min_width: int = 480
+    # Above this fraction of the screen that changed, the tiled refresh is
+    # used instead of one big crop: reading a grid of small tiles in
+    # parallel is faster than reading one huge rectangle.
+    roi_tiles_threshold: float = 0.01
+
+    # -- tiled refresh (item A of P3) --------------------------------------
+    # The scheduled refresh reads the frame as a grid of tiles and only the
+    # changed tiles are read by the OCR.
+    tiles_enabled: bool = True
+    tile_cols: int = 4
+    tile_rows: int = 3
+    # A tile whose changed-pixel fraction is above this value is read.
+    tile_changed_threshold: float = 0.004
+    # Above this fraction of changed tiles the whole frame is read instead.
+    tile_full_frame_ratio: float = 0.5
+    # Number of worker threads used to read the tiles in parallel.
+    tile_workers: int = 3
+    # The thread count of the ONNX Runtime session of each tile worker.
+    # With several tiles read at the same time the workers compete for the
+    # same cores, so 2 threads per worker measured faster than 3.
+    tile_intra_threads: int = 2
+
+    # -- downscaled diff (item B of P3) ------------------------------------
+    # The frame differencing runs on a downscaled copy of the frame.
+    diff_downscale: int = 4
+    # The full resolution diff is only used to refine the edges of a region.
+    diff_refine_edges: bool = True
+
+    # -- async pipeline (item C of P3) -------------------------------------
+    # The OCR of a frame overlaps the translation of the previous frame.
+    async_pipeline: bool = True
+    # How many translations may be in flight at the same time.
+    async_queue_size: int = 2
+
+    # -- OCR engine --------------------------------------------------------
+    # Number of ONNX Runtime intra-op threads. Measured on this machine:
+    # 3 threads is the fastest stable setting for both the full frame and
+    # the ROI crops.
+    ocr_intra_threads: int = 3
+
+    # The two-step read (item A of P3): the detection runs on a downscaled
+    # copy of the frame and the recognition on the crops of the original
+    # frame, in parallel. The detector is the slow part of the OCR and it
+    # always runs at the size of the image it is given, so the only way to
+    # make it faster is to give it a smaller image. The recognition keeps
+    # the native pixel size of the text, so the accuracy is not lost.
+    ocr_two_step: bool = True
+    # The scale of the frame the detection runs on. Measured on the fixture
+    # (j): 0.35 gives the same 10 text lines as the plain call and is
+    # faster (972 ms -> 437 ms). 0.5 is the default because the 0.7x font
+    # keeps its sentence-ending period at 0.5 (at 0.35 it is sometimes
+    # lost), and it is still well under the 500 ms target.
+    ocr_detect_scale: float = 0.5
+    # Number of worker threads used to recognize the text lines in parallel.
+    ocr_rec_workers: int = 8
+    # The thread count of the ONNX Runtime session of each recognition
+    # worker. The recognition of a single line is short, so 1 thread per
+    # worker measured fastest (190 ms for 10 lines with 4 workers).
+    ocr_rec_intra_threads: int = 1
+
     overlay: OverlayConfig = field(default_factory=OverlayConfig)
     translation: TranslationConfig = field(default_factory=TranslationConfig)
     capture: CaptureConfig = field(default_factory=CaptureConfig)
     speaker: SpeakerConfig = field(default_factory=SpeakerConfig)
+    hud: HUDConfig = field(default_factory=HUDConfig)
     cache_db_path: Path = PROJECT_ROOT / "data" / "cache.db"
     sessions_dir: Path = PROJECT_ROOT / "data" / "sessions"
     glossary_path: Path = PROJECT_ROOT / "config" / "glossary.yaml"
@@ -161,11 +277,12 @@ def load_config(path: str | Path | None = None) -> Config:
     translation_data = data.pop("translation", {}) or {}
     capture_data = data.pop("capture", {}) or {}
     speaker_data = data.pop("speaker", {}) or {}
+    hud_data = data.pop("hud", {}) or {}
     cache_data = data.pop("cache", {}) or {}
     sessions_data = data.pop("sessions", {}) or {}
     glossary_data = data.pop("glossary", {}) or {}
 
-    for key in ("overlay", "translation", "capture", "speaker"):
+    for key in ("overlay", "translation", "capture", "speaker", "hud"):
         data.pop(key, None)
 
     cfg = Config(**{k: v for k, v in data.items() if k in defaults.__dict__})
@@ -175,6 +292,7 @@ def load_config(path: str | Path | None = None) -> Config:
     )
     cfg.capture = CaptureConfig(**{**defaults.capture.__dict__, **capture_data})
     cfg.speaker = SpeakerConfig(**{**defaults.speaker.__dict__, **speaker_data})
+    cfg.hud = HUDConfig(**{**defaults.hud.__dict__, **hud_data})
 
     if cache_data.get("db_path"):
         cfg.cache_db_path = PROJECT_ROOT / cache_data["db_path"]

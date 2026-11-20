@@ -32,6 +32,23 @@ speaker_gap_px: 120
 # Maximum words in a line that may be a speaker name.
 speaker_max_words: 3
 
+# --- adaptive grouping (P3, item D) ------------------------------------
+# The two gaps above are the *reference* values (1080p). With the adaptive
+# grouping on (the default) they are replaced by a fraction of the font
+# height measured on the current frame, so the same dialogue is grouped
+# into the same blocks with a normal font AND with a 0.7x font.
+adaptive_grouping: true
+
+# group_gap_px = measured_font_height * group_gap_ratio
+group_gap_ratio: 0.55
+
+# speaker_gap_px = measured_font_height * speaker_gap_ratio
+speaker_gap_ratio: 3.0
+
+# Below this number of detected lines the measured font height is not
+# trusted and the reference 1080p values are used instead.
+adaptive_min_lines: 2
+
 # --- ROI OCR (P2) ---------------------------------------------------------
 # Only the changed part of the screen is read by the OCR. This is the
 # biggest latency win: the OCR of a dialogue-only change drops from ~800 ms
@@ -57,6 +74,89 @@ roi_full_refresh_ms: 2000
 # ... or after this many frames, whichever comes first.
 roi_full_refresh_frames: 10
 
+# --- per-region ROI (P3, item A) ---------------------------------------
+# The changed area is split into several disjoint rectangles instead of one
+# big union rectangle, so a change in two distant corners does not cost a
+# crop that covers the whole screen. The rectangles are read in parallel.
+roi_regions_enabled: true
+
+# A region smaller than this (in pixels, scaled) is merged into its nearest
+# neighbour instead of being read on its own.
+roi_region_min_area: 1200
+
+# Maximum number of regions that are read in one frame.
+roi_max_regions: 4
+
+# Number of worker threads used to read the regions in parallel.
+roi_workers: 3
+
+# Two components of the diff mask that are on the same line and closer than
+# this (reference pixels at 1080p) belong to the same region. This is what
+# keeps a text line in one piece: the diff of a changed line is made of
+# one component per glyph.
+roi_region_merge_gap: 200
+
+# --- tiled refresh (P3, item A) ----------------------------------------
+# The scheduled refresh reads the frame as a grid of tiles and only the
+# changed tiles are read by the OCR. The full-frame OCR of the scheduled
+# refresh is replaced by this tiled read.
+tiles_enabled: true
+tile_cols: 4
+tile_rows: 3
+
+# A tile whose changed-pixel fraction is above this value is read.
+tile_changed_threshold: 0.004
+
+# Above this fraction of changed tiles the whole frame is read instead
+# (reading more than half of the tiles is slower than one full read).
+tile_full_frame_ratio: 0.5
+
+# Number of worker threads used to read the tiles in parallel.
+tile_workers: 3
+
+# --- downscaled diff (P3, item B) --------------------------------------
+# The frame differencing runs on a downscaled copy of the frame (1/4 of
+# the size by default): the full resolution differencing cost 38-43 ms.
+diff_downscale: 4
+
+# The full resolution diff is only used to refine the edges of a region.
+diff_refine_edges: true
+
+# --- async pipeline (P3, item C) ---------------------------------------
+# The OCR of a frame overlaps the translation of the previous frame: the
+# translation runs in a background thread.
+async_pipeline: true
+
+# How many translations may be in flight at the same time.
+async_queue_size: 2
+
+# --- OCR engine --------------------------------------------------------
+# Number of ONNX Runtime intra-op threads. Measured on this machine: 3
+# threads is the fastest stable setting for both the full frame and the
+# ROI crops.
+ocr_intra_threads: 3
+
+# The two-step read: the detection runs on a downscaled copy of the frame
+# and the recognition on the crops of the ORIGINAL frame, in parallel.
+# The detector is the slow part of the OCR (598 ms of the 972 ms of a full
+# frame read) and it always runs at the size of the image it is given, so
+# the only way to make it faster is to give it a smaller image. The
+# recognition keeps the native pixel size of the text, so nothing is lost.
+# Measured on the fixture (j): 972 ms -> 437 ms, same 10 text lines.
+ocr_two_step: true
+
+# The scale of the frame the detection runs on. 0.5 keeps the small text
+# (the 0.7x font) intact; below 0.4 the sentence-ending period of the small
+# font is sometimes lost.
+ocr_detect_scale: 0.5
+
+# Number of worker threads used to recognize the text lines in parallel.
+ocr_rec_workers: 8
+
+# The thread count of each recognition worker: the recognition of a single
+# line is short, so 1 thread per worker measured fastest.
+ocr_rec_intra_threads: 1
+
 overlay:
   font_family: "Segoe UI"
   font_size: 20          # reference size at 1080p height; scaled at runtime
@@ -74,6 +174,21 @@ overlay:
 
 hotkey: F8
 
+# --- live latency HUD (P3, item E) ------------------------------------
+# A small diagnostic overlay in the corner of the screen that shows the
+# stage timings and the running median. It shows numbers only, never a
+# translated text. OFF by default, toggled with F9.
+hud:
+  enabled: false
+  hotkey: F9
+  # Number of cycles kept for the running median.
+  history: 10
+  font_size: 14
+  text_color: "#8CFF8C"
+  background_color: "#101010"
+  background_alpha: 200
+  margin: 10
+
 # Translation engine: "argos" or "marian". Selected by the P1 benchmark.
 translation:
   engine: argos
@@ -85,7 +200,6 @@ translation:
   split_sentences: true
   # Sentence splitter: "regex" (fast, default) or "stanza" (the Argos one).
   sentence_splitter: regex
-
 # Speaker detection: the UI-label blacklist and the character roster.
 speaker:
   enabled: true

@@ -1,192 +1,55 @@
-# P2 - WuWa Screen Translation Tool: ROI OCR + bug fixes
+# P3 RESUME - Continue P3 from src/display.py, do not restart
 
 ## ROLE
-You are a senior Python developer. You optimize a working Windows desktop tool for speed and correctness, with clean code, tests, and real benchmarks. You never fabricate numbers.
+You are a senior Python developer. You resume an interrupted phase of work, finish it cleanly, and never redo work that is already done. You never fabricate numbers.
 
 ## CONTEXT
-- Read PROJECT_CONTEXT.md and REPORT.md first for full project context. They are the canonical sources. Do not paste the whole codebase into your context.
-- User: Hiep, plays Wuthering Waves (WuWa) on Windows, game runs borderless.
-  Machine: Intel Core i5 Gen 12, 16GB RAM, RTX 3050 Ti Laptop 4GB (VRAM is already
-  almost full while playing the game).
+- This is a RESUME prompt for P3 of the WuWa Screen Translation Tool. The P3 work was interrupted while implementing item F (per-monitor DPI hot-plug) in src/display.py. Do NOT restart P3 from scratch. Do NOT redo items A-E if they are already done and tested.
+- Read PROJECT_CONTEXT.md and REPORT.md first for full project context. They are the canonical sources. The P3 brief is in prompt.md from the start of this chat; re-read it before continuing.
 - Local path: D:\translate_wuwa
 - GitHub repo: https://github.com/TranDaiHiep2006/translate_wuwa
-- Workflow: Hiep is the middleman. I write the prompt, Hiep pastes it to Cursor,
-  you code + commit + push to the repo above, and return a REPORT. Hiep will
-  test on the real machine.
-- P1 status (2026-11-20, HEAD 2cfd167, 5 commits, verified on GitHub):
-  pytest 44 passed / 0 failed. Tool works fully offline. Engine Argos,
-  capture dxcam. Latency cold 1607 ms / warm 787 ms on 1920x1080 fixtures.
-  Goal under 0.5 s was NOT reached. Slowest stage is OCR inference
-  (660-1898 ms, about 92 percent of the total). Translation is only 59-273 ms cold.
-- Keep everything from P1 working. This is an optimization and bug-fix phase,
-  not a rebuild. Do not rewrite the pipeline, do not change the translation
-  engine, do not change the capture backend, unless a benchmark you run proves
-  the change is faster with no accuracy loss.
+- P2 status (verified on GitHub, code HEAD 29c3eee, report HEAD 430b736, 10 commits): pytest 108 passed. In-game ROI path 143 ms on a good run, full-frame sweep 802 ms warm / 1741 ms cold.
+- The user pasted the current src/display.py content into the chat, but the pasted text is corrupted by chat formatting (collapsed import lines, stray markers). The file on disk is the source of truth. Read D:\translate_wuwa\src\display.py from disk and ignore the formatting of the pasted copy.
 
-## GOAL OF P2
-Cut end-to-end latency toward under 0.5 s warm, and fix the four main P1 bugs.
-P2 succeeds if the warm end-to-end time drops clearly and the four bugs below
-are fixed with tests. If under 0.5 s is still not reached, REPORT the real
-numbers and name the next bottleneck. NEVER claim under 0.5 s without measuring it.
+## FIRST STEP - INSPECT THE CURRENT STATE BEFORE WRITING ANY CODE
+1. Run git status and git log --oneline -15. Record which files are modified, staged, untracked, or already committed for P3.
+2. Read src/display.py from disk. Run python -m py_compile src/display.py. If it has a syntax error, fix only the syntax, then report what was broken.
+3. For each P3 item (A tiled refresh + per-region ROI + parallel OCR, B downscaled diff, C async pipeline, D adaptive grouping, E latency HUD, F hot-plug, G sentence splitter hardening), check the code and the tests and record DONE, PARTIAL, or NOT STARTED, with the evidence (file + test names). Do not trust memory: check the files.
+4. Run python -m pytest -q and record the current pass/fail count. If tests fail, fix the failures before adding new work.
+5. Report this state check in the final REPORT, so the next reader can see exactly where P3 was resumed from.
 
-## ABSOLUTE PROHIBITIONS (unchanged from P1)
-- DO NOT read the game memory / process, DO NOT inject, NO DLL, DO NOT modify
-  game files, DO NOT automatically press keys / control the game.
-- Only allowed: screenshot capture + drawing a separate overlay window outside
-  the game.
-- DO NOT call any online translation API (Google / DeepL / OpenAI / Gemini...).
-  No API key required. After the first model download, the tool must run
-  fully OFFLINE.
-- DO NOT hardcode 1920x1080 or any resolution. Every pixel value scales with
-  the real resolution. Tests must cover 1920x1080 and 2560x1600.
-- Keep the code in Python. The bottleneck is ONNX Runtime inference (C++),
-  not Python code.
+## CONTINUE FROM HERE, IN THIS ORDER
+1. Finish item F (hot-plug) from the current src/display.py: the file already contains DisplayState, read_dpi, DisplayWatcher (observe, on_changed, describe), and restart_capture. Finish the wiring: poll DisplayWatcher.observe() from the worker thread on every frame (cheap size check; DPI query only when the size changed), on a detected change call restart_capture() to close and recreate the capture backend on the new monitor without restarting the whole tool, resize the overlay, recompute the scaling factor via Config.scale(), and log DisplayWatcher.describe(). The overlay must follow the game to the new monitor with the correct resolution, font size, and bbox scaling. If a clean hot-plug is not possible with dxcam (it binds its output to one device at creation, DXGI Desktop Duplication cannot run from two capture sessions at once), the restart-capture behaviour above is the accepted next best thing: record exactly what works and what does not in the REPORT.
+2. Add tests for item F: observe() returns False on the first observation (baseline) and on an unchanged size, returns True on a changed size, restarts is counted by on_changed(), scale() returns height / 1080, describe() contains the size, dpi, detections, and restarts. Add a test that restart_capture() closes the old backend and creates a new one (mock the backend if needed).
+3. Then do item G (sentence splitter hardening): extend the abbreviation list and decimal handling, add tests for Dr., Mr., Mrs., e.g., i.e., U.S., decimal commas, and numbers with commas (1,234). Keep the regex splitter as the default and Stanza available as a fallback in config.
+4. Then verify any P3 item recorded as PARTIAL in the state check, in the original P3 order (A, then B, then C, then D, then E), and finish it before moving on. Run the tests after each item. Do not start the next item while the previous one has failing tests.
+5. Reuse the P3 fixtures (h), (i), (j) if they already exist; create them only if they are missing. Do not regenerate the P1/P2 fixtures.
 
-## WORK ITEMS, IN THIS ORDER
+## FINISH P3
+1. Run the full test suite: python -m pytest -q. Requirement: at least 120 tests total, all passing, no regression from the P2 108 tests.
+2. Rerun scripts/bench.py. Every latency number must be the median of at least 5 repeated runs, with min and max shown. Print the P2 vs P3 table per stage, cold vs warm, on the same 1920x1080 fixtures, plus a separate in-game ROI table (median/min/max) and a tiled-refresh table for fixture (j).
+3. Update PROJECT_CONTEXT.md section 10 with the P3 status and the new config keys, update README.md (tiled refresh, per-region ROI, downscaled diff, async pipeline, adaptive grouping, HUD toggle F9, hot-plug behaviour, new config keys), and append the P3 REPORT to REPORT.md in English.
+4. git add, commit, and push to main on https://github.com/TranDaiHiep2006/translate_wuwa. If the push fails, record the exact error in the REPORT and write the retry instructions in the README. Do not pretend the push succeeded.
 
-### A. ROI OCR - the main work, do this first
-- src/change.py already produces a diff mask. Use it to compute the changed
-  bounding rectangle of the frame. Expand it by a configurable padding
-  (for example 10-20 px at 1080p reference height, scaled at runtime via
-  Config.scale()). Crop the frame to that ROI and run OCR only on the ROI.
-- Offset every OCR bbox back to full-screen coordinates (x + roi_x, y + roi_y).
-  This offset is the most error-prone part: a wrong offset shifts every overlay.
-  Add a dedicated test for it.
-- Rules: no change -> skip OCR entirely. Small change -> small ROI. Large change
-  or first frame -> full-frame fallback. If the union of changed regions covers
-  more than 80 percent of the screen, use the full frame instead of a huge ROI.
-  Add config keys: roi_enabled (default true), roi_padding_px, roi_min_area,
-  roi_full_frame_threshold (default 0.8).
-- Keep debounce, grouping, speaker detection, and cache working on the offset
-  coordinates exactly as before.
-- Target to measure, not to promise: ROI OCR on a dialogue-only change
-  100-200 ms (P1 full-frame OCR was about 800 ms warm). Report the measured
-  ROI OCR time vs full-frame OCR time on the same images.
-
-### B. Overlay text wrapping + opaque background
-- Wrap the Vietnamese text inside the bbox width. Grow the bbox vertically
-  as needed. Do not change the font size unless the wrapped text still does
-  not fit after growing vertically.
-- The overlay background must be fully opaque by default (configurable, default
-  opaque), so the original English text is hidden, not slightly visible through
-  a semi-transparent background.
-- Keep the overlay click-through, always on top, never stealing focus, never
-  blocking game input. Update data/overlay_demo.png as proof.
-- Test: a long translation that overflowed in P1 must now fit inside the bbox
-  width with no clipped text.
-
-### C. Sentence-by-sentence translation - fix the lost digits
-- P1 bug: Reward: 12000 was translated as Phan thuong:2000. Cause: the merged
-  block was translated as one unit and the Argos sentence splitter re-tokenized
-  it and lost a digit.
-- Fix: split each grouped block into sentences before translation, translate
-  each sentence separately, then rejoin with the original separators and spaces.
-  Do not split inside numbers, decimals, or abbreviations. Reward: 12000 must
-  stay as one unit and come back with 12000 intact.
-- Numbers, percentages, and proper nouns must be preserved exactly. Add tests:
-  Reward: 12000, 15 percent, and at least one multi-sentence block.
-- Cache per sentence as well as per block, so a repeated sentence is a cache hit.
-  Keep the glossary placeholder protect/restore working per sentence.
-- If the Stanza sentence splitter adds about 200 ms per batch, try a lightweight
-  regex splitter first and only fall back to Stanza when needed. Measure and
-  report the splitter cost.
-
-### D. Speaker detector: UI-label blacklist + character roster
-- P1 bug: Quest, Skill, Inventory, Settings were treated as speaker names.
-- Create config/ui_labels.yaml (or add the list to config/config.yaml if that
-  fits the existing structure better): a blacklist including Quest, Skill,
-  Objective, Mission, Inventory, Settings, Skills, and other common WuWa UI
-  labels you find in the fixtures and in the game UI. Matching is
-  case-insensitive, after stripping whitespace and an optional trailing colon.
-  A line matching the blacklist is NEVER a speaker.
-- Create config/roster.yaml: the WuWa playable Resonator names (Rover, Jiyan,
-  Changli, Carlotta, Shorekeeper, and the other major playable characters as
-  of game version 3.7, plus any NPC names you can list confidently). The file
-  must be editable so the user can add names later.
-- New speaker rule: a short capitalized line above a dialogue block is a
-  speaker ONLY if (a) it is NOT in the blacklist, AND (b) it is either in the
-  roster, OR it ends with a colon and is 1-3 words long (this keeps NPC names
-  with a colon while blocking bare labels). A standalone menu line with no
-  dialogue block below it is never a speaker.
-- Update the session history output accordingly: entries previously mislabeled
-  as Quest: or Skill: must now show no speaker, or the correct speaker.
-- Tests: Quest, Skill, Inventory, Settings must NOT be speakers. Jiyan and
-  Rover MUST still be speakers.
-
-### E. Smaller / faster OCR models - experiment only, do this last
-- Only after A-D are done and measured: try the PP-OCRv4 mobile detection model
-  instead of the bundled server model, and an int8 quantized recognition model.
-  Benchmark them on the same fixtures. Switch the default ONLY if the benchmark
-  proves they are faster with no accuracy loss on the fixtures. If they are not
-  clearly better, keep the P1 models and report the experiment numbers in the
-  REPORT. Do not let this item delay or break A-D.
-
-## OUT OF SCOPE FOR P2
-- Do not change the translation engine (Argos stays the default).
-- Do not change the capture backend (dxcam stays the default).
-- Do not add GPU OCR (the RTX 3050 Ti has almost no free VRAM during play).
-- Do not add a live latency HUD (that is a later phase, not P2).
-- Do not claim a test on the real WuWa client unless you actually ran it there.
-  Fixture + real screen capture tests are enough for P2.
-
-## DETAILED TASKS
-1. Baseline first, before changing any code: run python -m pytest -q (expect
-   44 passed) and python scripts/bench.py (expect cold about 1607 ms, warm
-   about 787 ms). Record these numbers. If the baseline does not match, stop
-   and report the difference before changing code.
-2. Implement A, then B, then C, then D, in that order. Run the tests after each
-   item. Do not start the next item while the previous one has failing tests.
-3. New fixtures (draw with Pillow, do not use copyrighted game screenshots):
-   (d) the same frame twice, only the bottom dialogue box changed (ROI test),
-   (e) a long dialogue that needs wrapping, (f) a quest block with Reward: 12000,
-   (g) a menu with Quest, Skill, Inventory, Settings labels. Place them in
-   tests/fixtures/. Reuse the P1 fixtures for regression.
-4. Tests: at least 10 new tests, total at least 54, including: ROI coordinate
-   offset is correct, ROI skips an unchanged frame, ROI falls back to full frame
-   on a large change, wrapped text fits inside the bbox width, opaque background
-   hides the original text, sentence translation preserves 12000, blacklist
-   blocks Quest and Skill, roster accepts Jiyan and Rover, session history no
-   longer labels Quest or Skill as speakers, pipeline on a sample image still
-   returns at least 1 translated block.
-5. Benchmark: rerun scripts/bench.py and scripts/bench_translation.py. Print a
-   P1 vs P2 table per stage, cold vs warm, on the same 1920x1080 fixtures.
-   Also print a separate ROI vs full-frame OCR table from fixture (d).
-6. Update PROJECT_CONTEXT.md section 10 with the P2 status and the new config
-   keys, update README.md (ROI, wrapping, sentence translation, roster and
-   blacklist, new config keys), and append the P2 REPORT to REPORT.md in English.
-7. git add, commit, and push to main on
-   https://github.com/TranDaiHiep2006/translate_wuwa. If the push fails,
-   record the exact error in the REPORT and write the retry instructions in
-   the README. Do not pretend the push succeeded.
-
-## ACCEPTANCE CRITERIA FOR P2 (all must pass)
-- [ ] python -m pytest -q passes fully, no regression from the P1 44 tests.
-- [ ] Warm end-to-end time is clearly lower than the P1 787 ms. Target warm
-      under 500 ms. If the target is not reached, the REPORT must state the
-      real warm number and the next bottleneck, and must NOT claim under 500 ms.
-- [ ] ROI OCR on a dialogue-only change is measured and reported, with the
-      full-frame OCR time on the same image for comparison.
-- [ ] Reward: 12000 is translated with 12000 intact (not 2000).
-- [ ] Quest, Skill, Inventory, Settings are never shown as speakers. Jiyan and
-      Rover are still shown as speakers.
-- [ ] A long Vietnamese translation wraps inside the bbox width with no clipped
-      text, and the original English text is hidden by the opaque background.
-- [ ] Disconnect the network after the first model download: the tool still
-      translates (truly offline).
-- [ ] No online API calls, no API key in code/config. No game memory reading,
-      no injection, no DLL, no game file modification.
-- [ ] Code is pushed to https://github.com/TranDaiHiep2006/translate_wuwa
-      (or the REPORT states the exact reason it could not be pushed + how to retry).
+## ACCEPTANCE CRITERIA FOR P3 (all must pass, same as the original P3 brief)
+- [ ] python -m pytest -q passes fully, no regression from the P2 108 tests.
+- [ ] A big screen change (fixture j) is refreshed in under 500 ms warm (median of 5 runs). If the target is not reached, the REPORT must state the real median number and the next bottleneck, and must NOT claim it.
+- [ ] The in-game ROI path median is under 300 ms warm (median of 5 runs), and the max over those 5 runs is reported. The P2 single best run of 143 ms must NOT be presented as the P3 result.
+- [ ] The diff stage median is under 15 ms.
+- [ ] The same dialogue groups into the same blocks at normal font and at 0.7x font.
+- [ ] The HUD toggle F9 shows and hides the HUD, and the HUD numbers match the bench StageTimings.
+- [ ] The display change is detected, the capture restarts cleanly on the new monitor without restarting the tool, and the overlay follows with the correct resolution, font, and bbox scaling.
+- [ ] Disconnect the network after the first model download: the tool still translates (truly offline).
+- [ ] No online API calls, no API key in code/config. No game memory reading, no injection, no DLL, no game file modification.
+- [ ] Code is pushed to https://github.com/TranDaiHiep2006/translate_wuwa (or the REPORT states the exact reason it could not be pushed + how to retry).
 
 ## REPORT (mandatory, return at the end, concise, real numbers, in English)
-- Files created/changed + commit hash + GitHub commit link after pushing.
-- Baseline P1 numbers vs P2 numbers, per stage, cold vs warm, on the same
-  1920x1080 fixtures. ROI OCR time vs full-frame OCR time on fixture (d).
-- Conclusion: is warm end-to-end under 500 ms yet? If not, which stage is now
-  the slowest, and what should P3 optimize first?
-- 3 before/after examples: the Reward: 12000 fix, a speaker fix (Quest/Skill
-  no longer a speaker, Jiyan still a speaker), and a wrapping fix.
+- The state check from the first step: where P3 was resumed from, which items were DONE / PARTIAL / NOT STARTED, the pytest count at resume time.
+- Files created/changed in this resume + commit hash + GitHub commit link after pushing.
+- Baseline P2 numbers vs P3 numbers, per stage, cold vs warm, on the same 1920x1080 fixtures, every number as median of at least 5 runs with min/max. Separate tables for the in-game ROI path and for the tiled refresh on fixture (j). The ROI engine thread-count sweep table.
+- Conclusion: are the P3 targets met? If not, which stage is now the slowest, and what should the next phase optimize first?
+- 3 before/after examples: a big screen change refresh, a two-corner change, and the adaptive grouping at 0.7x font.
 - pytest result (number of tests passed/failed, total count).
-- Bugs / remaining limitations + P3 proposals.
-- Reply in English only in this chat, never Chinese. Paste the full English
-  REPORT here, in English only.
+- What works and what does not for per-monitor hot-plug.
+- Bugs / remaining limitations + what is still missing before the real-game test.
+- Reply in English only in this chat, never Chinese. Paste the full English REPORT here, in English only.

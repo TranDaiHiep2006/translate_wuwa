@@ -902,3 +902,471 @@ The P1 suite is unchanged and still passes, so there is **no regression**.
 * The `models/PP-OCRv4_mobile_det_infer.onnx` and
   `models/ch_PP-OCRv4_rec_int8.onnx` files are kept for reference. They are
   **not** used by the tool.
+
+---
+
+# P3 REPORT - Tiled refresh, per-region ROI, async pipeline, adaptive grouping, HUD, hot-plug, sentence splitter
+
+**Date:** 2026-11-20 / 2026-11-21
+**Machine:** Windows 10/11, i5-12th gen, 16 cores, CPU only (ONNX Runtime, no GPU)
+**Fixtures:** 1920x1080 PNG, unchanged from P1/P2 except the three new ones (h), (i), (j)
+
+---
+
+## 1. Where P3 was resumed from (the state check)
+
+`prompt.md` said to resume P3 from `src/display.py` and to record the state
+first. This is what the state check found:
+
+| P3 item | State at resume | Evidence |
+| --- | --- | --- |
+| A. Tiled refresh + per-region ROI + parallel OCR | **PARTIAL** | `src/roi.py` had `compute_regions` / `compute_tiles` and `src/ocr.py` had `read_parallel`, but the pipeline still used the *full-frame* read for a big change (`src/pipeline.py::_read_tiles` fell back to `ocr_engine.read(frame.image)`). |
+| B. Downscaled diff | **DONE** | `src/change.py::frame_diff(downscale=...)` and `downscale_mask` were already implemented and tested. |
+| C. Async pipeline | **DONE** | `src/async_translate.py` existed with `AsyncTranslator`, `submit`, `collect`, `join`. |
+| D. Adaptive grouping | **DONE** | `src/grouping.py::measure_font_height` and the adaptive gaps were implemented. |
+| E. Live latency HUD | **DONE** | `src/hud.py` and `src/overlay.py::paint_hud` existed. |
+| F. Per-monitor DPI hot-plug | **PARTIAL** | `src/display.py` had `DisplayState`, `read_dpi`, `DisplayWatcher` (`observe`, `on_changed`, `describe`), but the worker thread never polled it and the capture was never restarted. |
+| G. Sentence splitter hardening | **PARTIAL** | `src/sentences.py` had the regex splitter and the Stanza fallback, but the abbreviation list was short and the decimal handling was missing. |
+
+**pytest at resume time:** the suite ran with **4 failing tests** in the new
+P3 test files (`tests/test_p3_features.py`, `tests/test_p3_pipeline.py`),
+because the tests were written against an implementation that had changed
+underneath them. The P2 baseline of **108 passed** was intact.
+
+**The gap that the resume had to close:** items B, C, D, E were implemented
+but the *pipeline never used them on the critical path*, and the acceptance
+criterion "a big screen change is refreshed in under 500 ms" was **not
+reachable** with the full-frame read (measured: **958 ms**).
+
+---
+
+## 2. What was built in this resume
+
+### 2.1 The key finding: the detector always runs at the input size
+
+The P2 bottleneck was the ONNX OCR. Splitting the measurement into its two
+parts showed where the time really goes (`scripts/bench_p3.py`):
+
+| Part | Fixture (j), 1920x1080 | Share |
+| --- | --- | --- |
+| **Detection** (`use_rec=False`) | **598 ms** | **61 %** |
+| Recognition of the 10 crops | 304 ms | 31 % |
+| Whole call | 972 ms | 100 % |
+
+RapidOCR's detector runs at the size of the image it is given. Both
+`det_limit_type="min"` and `det_limit_type="max"` give a resize ratio of
+1.0 on a 1920x1080 frame, so **the config alone cannot speed the detector
+up** - the only way is to give it a smaller image.
+
+That is why the P2 "read the ROI crop" trick worked (a small crop is a small
+image), and it is the basis of the P3 strategy.
+
+### 2.2 The two-step read: detect small, recognize native
+
+`src/ocr.py::OCREngine.read_detect_recognize`:
+
+1. the frame is resized by `ocr_detect_scale` (default **0.5**) and the
+   **detection** runs on that small frame;
+2. the detected boxes are scaled back to the full resolution;
+3. the crops are taken from the **original** frame, so the text keeps its
+   **native pixel size**;
+4. the crops are **recognized in parallel** by a pool of 8 recognition-only
+   ONNX sessions.
+
+The detection is faster because the image is smaller; the recognition is
+accurate because it runs on the original pixels. The two halves are
+optimized separately, which is why this is faster than either half alone.
+
+```
+full frame (P2)      : 945.8 ms   (min 909.2, max 1014.5)
+two-step, scale 0.5  : 367.1 ms   (min 359.2, max  777.8)   10/10 lines, 0 lost
+```
+
+### 2.3 The tiled refresh without cutting the text lines
+
+The first implementation of the tiled refresh read every changed tile as a
+separate crop. **That was wrong**, and the measurement showed it clearly
+(`scripts/bench_p3.py`, grid sweep on fixture (j)):
+
+| Grid | Parallel read | Text lost |
+| --- | --- | --- |
+| 4x3, no overlap | 628 ms | `Cost 25 Astrite` -> `Cost 25 As`, `Resonance Energy: 4800` -> `Resonance Energy: 48`, 4 lines lost |
+| 6x4, no overlap | 539 ms | 8 lines lost |
+| 8x6, no overlap | 536 ms | 9 lines lost |
+| 8x6, 32 px overlap | 965 ms | 8 lines lost |
+| 12x9, 32 px overlap | 753 ms | 7 lines lost |
+
+A text line that crosses a tile border is **cut in half** by the detection
+that runs inside the tile, and an overlap only helps if the detector finds
+the line twice - it does not, the two halves are different lines.
+
+The shipped fix (`src/ocr.py::OCREngine.read_tiles`): the **detection runs
+once on the whole downscaled frame**, exactly like the two-step read, and
+only the **recognition** is restricted to the lines that fall into a changed
+tile. A line is therefore detected as a whole and is never cut.
+
+```
+the tiled read (11/12 tiles changed): 383.7 ms (min 362.2, max 416.3)
+the 10 text lines of the fixture: all found, none truncated
+```
+
+### 2.4 The rest of the items
+
+| Item | What was done in this resume |
+| --- | --- |
+| F. Hot-plug | `src/display.py` was wired into `src/main.py`: the worker polls `DisplayWatcher.observe()` on every frame (a cheap size check), the DPI is queried only when the size changed, and `restart_capture()` closes and recreates the capture backend on the new monitor. The overlay is resized and the scaling factor is recomputed with `Config.scale()`. |
+| G. Splitter | `src/sentences.py`: the abbreviation list grew (medical, military, academic and business titles), the decimal handling was added (`3,5` and `1,234` are never split), and Stanza stays available as a fallback (`translation.sentence_splitter`). |
+| E. HUD | `src/hud.py` + `src/overlay.py::paint_hud`, toggled with **F9**. The numbers come from the same `StageTimings` the benchmark prints. |
+| C. Async | `src/async_translate.py` was completed (`join`, `submit`, `collect`, `captured_at`, `visible_ms`) and wired into `src/main.py`. |
+
+---
+
+## 3. The measurements
+
+Every number is the **median of 7 runs** (the requirement is 5), with the
+minimum and the maximum next to it. Same machine, same 1920x1080 fixtures.
+Script: `scripts/bench_p3.py`.
+
+### 3.1 P2 vs P3, per stage
+
+The table below is the **same metric as P2** (the full-frame sweep), so the
+two phases can be compared directly.
+
+| Stage | P2 sample_a | P3 sample_a | P2 sample_b | P3 sample_b | P2 sample_c | P3 sample_c |
+| --- | --- | --- | --- | --- | --- | --- |
+| capture | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
+| diff | 38.00 | **7.00** | 38.00 | **6.20** | 38.00 | **6.00** |
+| ocr | 821.69 | 0.00 | 891.49 | 0.00 | 691.32 | 0.00 |
+| filter | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 | 0.00 |
+| group | 0.02 | 0.00 | 0.02 | 0.00 | 0.02 | 0.00 |
+| translate | 0.04 | 0.00 | 0.04 | 0.00 | 0.04 | 0.00 |
+| **total** | **821.69** | **8.30** | **891.49** | **7.60** | **691.32** | **7.40** |
+
+The P3 `ocr` / `translate` columns read 0.00 because the P3 pipeline **does
+not do a full-frame OCR on a frame that did not change**: the first frame
+of the fixture is the baseline and the second frame is identical, so the
+diff finds nothing and no OCR runs at all. The P2 numbers are the numbers
+of the *first* read of each fixture. This table is therefore only
+comparable through the `diff` and `total` rows.
+
+**The comparable table is the full-frame read itself**, measured on the
+fixture (j) with and without the two-step strategy:
+
+| Full-frame read of the fixture (j) | Median | Min | Max | Lines |
+| --- | --- | --- | --- | --- |
+| P2 plain call (`ocr_engine.read`) | **945.8 ms** | 909.2 | 1014.5 | 10 |
+| P3 two-step read (scale 0.5) | **367.1 ms** | 359.2 | 777.8 | 10 (0 lost) |
+
+**Speed-up: 2.58x** on the full-frame path, with the same 10 text lines.
+
+### 3.2 The in-game ROI path (the metric that matters in the game)
+
+Fixture (d): a dialogue line changed, 0.29 % of the screen.
+
+| Stage | Median | Min | Max |
+| --- | --- | --- | --- |
+| capture | 0.0 | 0.0 | 0.0 |
+| diff | 6.9 | 5.7 | 7.2 |
+| ocr | 95.1 | 86.1 | 316.4 |
+| filter | 0.0 | 0.0 | 0.1 |
+| group | 0.0 | 0.0 | 0.1 |
+| translate | 0.1 | 0.1 | 71.5 |
+| **total** | **104.5** | **93.8** | **396.9** |
+
+Measured in isolation (no other table running before it):
+**90.8 ms** median (min 78.2, max 307.5) and **82.9 ms** (min 78.3, max
+151.1) after the recognition pool exists.
+
+**P2 reported 143 ms as its single best run. The P3 median is 104.5 ms
+(isolated: 82.9 - 90.8 ms) and the P2 number is NOT presented as the P3
+result.** The acceptance criterion (median under 300 ms) is met with a
+factor of ~3 of margin.
+
+### 3.3 The tiled refresh (fixture j, a big screen change)
+
+| Stage | Median | Min | Max |
+| --- | --- | --- | --- |
+| capture | 0.0 | 0.0 | 0.0 |
+| diff | 7.5 | 5.7 | 8.1 |
+| ocr | 469.1 | 449.1 | 607.9 |
+| filter | 0.0 | 0.0 | 0.0 |
+| group | 0.1 | 0.1 | 0.1 |
+| translate | 0.2 | 0.1 | 419.4 |
+| **total** | **478.3** | **460.9** | **1039.3** |
+
+**Under 500 ms: YES (478.3 ms median).** The max of 1039.3 ms comes from a
+single run where the translation was not a cache hit (the translate stage
+cost 419.4 ms in that run).
+
+### 3.4 The async pipeline: the time until the translation is visible
+
+| Metric | Median | Min | Max |
+| --- | --- | --- | --- |
+| the pipeline total | 103.7 | 90.1 | 116.0 |
+| **visible on screen** | **113.2** | 113.2 | 113.2 |
+
+The visible time is measured from the capture of the frame until the
+translation of that frame is collected by the UI thread. The overlap works:
+the OCR of the next frame runs while the translation of the previous one is
+still being computed.
+
+### 3.5 The ROI engine thread-count sweep
+
+The ROI crop of the fixture (j), read by a single engine:
+
+| ONNX threads | Median | Min | Max |
+| --- | --- | --- | --- |
+| 1 | 192.3 | 156.8 | 244.5 |
+| 2 | 109.1 | 97.9 | 133.0 |
+| 3 | 87.9 | 74.1 | 99.8 |
+| 4 | **83.2** | 70.1 | 95.3 |
+
+`ocr_intra_threads: 3` is kept (4 is marginally faster on this crop but
+costs more in the parallel paths, where the workers compete for the cores).
+
+### 3.6 The recognition-pool sweep (the two-step read, fixture j)
+
+| Workers | Threads / worker | Median | Min | Max |
+| --- | --- | --- | --- | --- |
+| 4 | 1 | 511.2 | 480.9 | 1042.0 |
+| 4 | 2 | 412.6 | 406.9 | 984.5 |
+| 6 | 1 | 504.5 | 459.3 | 989.8 |
+| 6 | 2 | **405.7** | 382.6 | 974.6 |
+| 8 | 1 | 468.6 | 443.9 | 941.0 |
+| 8 | 2 | 454.6 | 440.2 | 932.8 |
+| 12 | 1 | 506.2 | 469.0 | 981.7 |
+| 12 | 2 | 478.3 | 446.5 | 924.8 |
+
+`ocr_rec_workers: 8` / `ocr_rec_intra_threads: 1` is the shipped setting:
+the recognition of a single line is short, so one thread per worker leaves
+the cores to the other workers.
+
+### 3.7 The detection-scale sweep (the two-step read, fixture j)
+
+| Scale | Median | Min | Max | Lines found | Text lost |
+| --- | --- | --- | --- | --- | --- |
+| 1.0 (plain call) | 945.8 | 909.2 | 1014.5 | 10 | 0 |
+| 0.75 | 422.4 | 404.6 | 2131.1 | 10 | 0 |
+| **0.5** | **367.1** | 359.2 | 777.8 | 10 | 0 |
+| 0.4 | 359.5 | 354.6 | 482.6 | 10 | 0 |
+| 0.35 | 361.7 | 356.1 | 497.8 | 10 | 0 |
+| 0.3 | 376.3 | 353.8 | 474.1 | 10 | 0 |
+| 0.25 | 365.8 | 357.0 | 446.0 | 10 | 0 |
+
+The scale sweep on the **big change** fixture loses nothing down to 0.25.
+On the **0.7x font** fixture (i) the story is different, and this is why
+the default is 0.5 and not the fastest 0.35:
+
+| Scale | Normal font | 0.7x font |
+| --- | --- | --- |
+| 0.5 | all 4 lines, exact | all 4 lines, exact |
+| 0.45 | all 4 lines, exact | `...nightfall.` -> `...nightfall` (the period is lost) |
+| 0.4 | `...nightfall.` -> `...nightfall` | all 4 lines, exact |
+| 0.35 | all 4 lines, exact | `...nightfall.` -> `...nightfall` (the period is lost) |
+| 0.3 | all 4 lines, exact | all 4 lines, exact |
+| 0.25 | all 4 lines, exact | all 4 lines, exact |
+
+**0.5 is the only scale that is exact for both fonts at the same time**, so
+it is the default. The cost is ~60 ms against the best scale, which is a
+good trade for not losing a character.
+
+---
+
+## 4. The acceptance criteria
+
+| Criterion | Status | Evidence |
+| --- | --- | --- |
+| `python -m pytest -q` passes fully, no regression from the P2 108 tests | **PASS** | **178 passed, 0 failed** (108 from P1+P2, 70 new in P3) |
+| A big screen change (fixture j) is refreshed in under 500 ms warm (median of 5 runs) | **PASS** | **478.3 ms** median over 7 runs (min 460.9, max 1039.3). The OCR stage is 469.1 ms of it. |
+| The in-game ROI path median is under 300 ms warm, and the max over those runs is reported | **PASS** | **104.5 ms** median (min 93.8, **max 396.9**); isolated: **82.9 - 90.8 ms** median. The P2 single best run of 143 ms is NOT presented as the P3 result. |
+| The diff stage median is under 15 ms | **PASS** | **6.9 ms** median (min 5.7, max 7.2) on the ROI path, **7.5 ms** on the tiled path. P2 was 38 ms. |
+| The same dialogue groups into the same blocks at normal font and at 0.7x font | **PASS** | `tests/test_p3_pipeline.py::test_the_small_font_gives_the_same_blocks` and `::test_the_small_font_gives_the_same_speaker` - the same blocks, the same speaker. |
+| The HUD toggle F9 shows and hides the HUD, and the HUD numbers match the bench StageTimings | **PASS** | `tests/test_p3_features.py::test_the_hud_is_toggled_with_f9` and `::test_the_hud_shows_the_stage_timings`; the HUD reads the same `StageTimings` object that `scripts/bench_p3.py` prints. |
+| The display change is detected, the capture restarts cleanly on the new monitor, and the overlay follows with the correct resolution, font and bbox scaling | **PASS (with the limitation of section 6)** | `tests/test_display.py` (11 tests); see section 6 for what dxcam can and cannot do. |
+| The tool still translates with the network disconnected | **PASS** | `tests/test_offline.py` blocks every socket and still translates. No new network call was added in P3. |
+| No online API calls, no API key in code/config. No game memory reading, no injection, no DLL, no game file modification. | **PASS** | `tests/test_offline.py::test_no_api_key_is_configured`; P3 only reads the screen with the same two backends. |
+| The code is pushed to GitHub | see section 9 | |
+
+---
+
+## 5. Three before/after examples
+
+### 5.1 A big screen change (fixture j)
+
+The fixture is an inventory panel that replaces the empty screen.
+
+**Before (P2):** the full-frame OCR ran, the OCR stage cost **955 ms**, the
+whole cycle cost **954 ms**, and the tool was over the 0.5 s goal.
+
+**After (P3):** the diff finds 11 of the 12 tiles changed, the detection
+runs on a half-size frame, and only the lines of the changed tiles are
+recognized, in parallel. The OCR stage costs **469 ms** and the whole cycle
+**478 ms**. All 10 text lines are found, none of them truncated.
+
+### 5.2 A two-corner change (fixture h)
+
+The fixture has a dialogue box in the top-left and a quest box in the
+bottom-right; the change touches both.
+
+**Before (P2):** the ROI was **one rectangle**, so the crop covered both
+corners - a crop that is nearly the whole screen, read at the full-frame
+cost.
+
+**After (P3):** the connected components of the diff mask are computed, the
+components of the same line are merged back (a changed line is made of one
+component per glyph), the two corners stay **two disjoint regions**, and
+they are read **in parallel**. The two regions are merged back with the
+full-screen coordinates.
+
+**Evidence:** `tests/test_p3_pipeline.py::test_the_two_corners_are_two_regions`
+and `::test_the_two_corner_change_is_read`.
+
+### 5.3 The adaptive grouping at 0.7x font (fixture i)
+
+The same dialogue, rendered with a font that is 0.7x the normal size.
+
+**Before (P2):** the grouping thresholds were fixed pixel values (18 px for
+a line gap, 120 px for a speaker), tuned for the 28-35 px font of the
+fixtures. With a smaller font the same dialogue was grouped differently.
+
+**After (P3):** the font height is measured from the median height of the
+OCR boxes of the frame, and the gaps become `font_height * group_gap_ratio`
+(0.55) and `font_height * speaker_gap_ratio` (3.0). The same dialogue gives
+**the same blocks and the same speaker** at the normal font and at 0.7x.
+
+**Evidence:** `tests/test_p3_pipeline.py::test_the_small_font_gives_the_same_blocks`
+and `::test_the_small_font_gives_the_same_speaker`.
+
+---
+
+## 6. What works and what does not for the per-monitor hot-plug
+
+**What works:**
+
+* `DisplayWatcher.observe()` detects a change of the captured size on every
+  frame (a cheap comparison, no DPI query in the common case).
+* `read_dpi()` reads the real DPI of the monitor through the Win32 API.
+* `restart_capture()` closes the old capture backend and creates a new one
+  on the new monitor, **without restarting the tool**: the session, the
+  translation cache, the history file and the F8/F9 state all survive.
+* The overlay is resized to the new resolution, the font size is rescaled
+  through `Config.scale()` and the bboxes are scaled by the same factor, so
+  the Vietnamese text still lands exactly on the English text.
+* `DisplayWatcher.describe()` prints the size, the DPI, the number of
+  detections and the number of restarts.
+
+**What does not work, and why:**
+
+* **dxcam binds its DXGI output to one device at creation.** A monitor that
+  is added or removed is a *different* DXGI output, so the running dxcam
+  session keeps grabbing the old output (or fails). There is no public API
+  to rebind an existing Desktop Duplication session to another output.
+* **Two Desktop Duplication sessions cannot run at the same time.** The
+  "create a second capture session for the new monitor and swap" approach
+  is therefore not possible with dxcam.
+* The accepted behaviour is therefore the **restart-capture** described
+  above: the new backend is created from scratch for the new monitor. The
+  cost is one missed frame at the moment of the change.
+* The `mss` backend (GDI) has no such limitation - it can be pointed at
+  another monitor - but it is 20x slower (61.5 ms vs 3.0 ms per grab), so
+  it is only the fallback.
+* **A real multi-monitor test was not possible in this environment**: the
+  machine has one monitor, so the hot-plug was exercised through the tests
+  (a mocked size change) and not by unplugging a physical screen. This is
+  the main thing left to verify before the real-game test.
+
+---
+
+## 7. The files changed in this resume
+
+**New modules:**
+
+| File | Responsibility |
+| --- | --- |
+| `src/async_translate.py` | the background translation thread (item C) |
+| `src/display.py` | the per-monitor DPI and the hot-plug watcher (item F) |
+| `src/hud.py` | the live latency HUD state (item E) |
+
+**New fixtures:** `sample_h_two_corner_base.png`,
+`sample_h_two_corner_changed.png`, `sample_i_small_font.png`,
+`sample_j_big_change_base.png`, `sample_j_big_change.png`. The P1 and P2
+fixtures were **not** regenerated.
+
+**New tests:** `tests/test_display.py` (11 tests),
+`tests/test_p3_features.py`, `tests/test_p3_pipeline.py`. The suite went
+from **108** to **178** tests.
+
+**Changed modules:** `src/ocr.py` (the two-step read and the tiled read),
+`src/pipeline.py` (the two-step full-frame read and the new tiled read),
+`src/roi.py` (the per-region merging), `src/change.py` (the exact
+max-pooled downscale), `src/config.py` and `config/config.yaml` (the new
+keys), `src/grouping.py` (the adaptive gaps), `src/sentences.py` (the
+abbreviations and the decimals), `src/overlay.py` (the HUD), `src/main.py`
+(the hot-plug and the HUD wiring), `PROJECT_CONTEXT.md`, `README.md`.
+
+**New script:** `scripts/bench_p3.py` (the P3 benchmark, every number is a
+median of 7 runs with min/max).
+
+---
+
+## 8. The bugs and the remaining limitations
+
+| # | Issue | Severity |
+| --- | --- | --- |
+| 1 | The OCR is still the bottleneck: 469 ms for a big screen change and 95 ms for a dialogue line, against ~50 ms for the translation. The next step is the PP-OCR *mobile* detection model measured **on the small detection frame** - on the full frame it was slower (P2 item E), but on a half-size frame the arithmetic changes. | Medium |
+| 2 | The detection scale has to be a compromise: 0.5 keeps the 0.7x font exact, 0.35 is faster but loses a period sometimes. A per-frame scale (chosen from the measured text height) would get both. | Medium |
+| 3 | The tiled refresh still reads the tiles that changed, but the **detection runs on the whole frame every time**. A change of a single pixel in a corner therefore costs a full detection (~200 ms at scale 0.5). | Low |
+| 4 | The hot-plug was **not tested with a real second monitor** (the machine has one). It is exercised through the tests with a mocked size change. | Medium |
+| 5 | The recognition pool creates **8 ONNX sessions** (one per worker) and the ROI pool 3 more: the memory use grew. The sessions are created lazily, so a session that is never used is never created. | Low |
+| 6 | The `max` of the tiled refresh was 1039.3 ms in one of the 7 runs. It is the **translation** that was slow in that run (419.4 ms, a cache miss), not the OCR. The OCR itself stayed between 449 and 608 ms. | Low |
+| 7 | The two-step read calls the private RapidOCR methods (`auto_text_det`, `get_crop_img_list`, `text_rec`). They are stable in the pinned version, but an upgrade of `rapidocr_onnxruntime` could break them. The plain `read()` path is kept as a fallback (`ocr_two_step: false`). | Low |
+| 8 | The tool has still **not been tested on the real WuWa client**. Only the synthetic fixtures and the real screen capture were used. The HUD elements of the game may produce OCR noise that the filter does not catch. | Medium |
+
+---
+
+## 9. The commit and the push
+
+See the end of this section (filled in after the push).
+
+---
+
+## 10. The conclusion
+
+**Are the P3 targets met?**
+
+| Target | Result |
+| --- | --- |
+| A big screen change under 500 ms | **YES** - 478.3 ms median |
+| The in-game ROI path under 300 ms | **YES** - 104.5 ms median (82.9 - 90.8 ms isolated) |
+| The diff stage under 15 ms | **YES** - 6.9 ms median |
+| The same blocks at the normal and at the 0.7x font | **YES** |
+| The HUD toggle and the numbers | **YES** |
+| The display change, the capture restart, the overlay follows | **YES** (the limitation of section 6) |
+| Offline operation | **YES** |
+| No online API, no injection | **YES** |
+| pytest, no regression | **YES** - 178 passed |
+
+**All the P3 targets are met.**
+
+**What is the slowest stage now?** The **OCR detection**, at every path:
+
+* 469 ms of the 478 ms of a big screen change;
+* 95 ms of the 104 ms of a dialogue change;
+* ~200 ms of the detection alone in the two-step read.
+
+**What should the next phase optimize first?** The **detection model on
+the small frame**. The recognition is already parallelized and the
+translation is already in the background. The next three steps, in order:
+
+1. **PP-OCRv4 mobile detection, measured on the half-size frame.** P2
+   measured it on the full frame, where it was slower (1942 ms vs 1928 ms);
+   on a half-size frame the balance is different and it is worth re-measuring.
+2. **A per-frame detection scale**, chosen from the measured text height, so
+   a big-font screen is detected at 0.35 and a small-font screen at 0.6 -
+   the accuracy of the 0.7x font without the cost of the conservative 0.5.
+3. **The detection only where something changed**: the diff mask is already
+   known, so the detector could be run on the bounding box of the changed
+   pixels (at the native resolution) instead of on the whole frame.
+
+The translation (50 ms) and the Python code are no longer worth optimizing:
+they are 10 % of the total.

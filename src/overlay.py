@@ -22,7 +22,8 @@ from PyQt6.QtCore import QObject, QRect, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PyQt6.QtWidgets import QApplication, QWidget
 
-from .config import OverlayConfig
+from .config import HUDConfig, OverlayConfig
+from .hud import HUDSnapshot, format_hud_lines
 from .wrapping import WrappedText, fit_text, split_display_text
 
 
@@ -58,6 +59,8 @@ class OverlayState:
     screen_width: int = 1920
     screen_height: int = 1080
     active: bool = False
+    # The live latency HUD (item E of P3). None = the HUD is hidden.
+    hud: Optional[HUDSnapshot] = None
 
 
 class OverlayBridge(QObject):
@@ -74,10 +77,59 @@ class OverlayBridge(QObject):
         self.state_changed.emit(None)
 
 
+def paint_hud(
+    painter: QPainter,
+    snapshot: HUDSnapshot,
+    config: HUDConfig,
+    screen_height: int,
+) -> None:
+    """Draw the live latency HUD in the top-right corner.
+
+    The HUD shows numbers only - never a translated text. It is painted by
+    the same widget as the translations, so it cannot slow the main overlay
+    down and it never takes the focus.
+    """
+    painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+    font = QFont("Consolas")
+    font.setPixelSize(max(8, int(round(config.font_size * screen_height / 1080.0))))
+    painter.setFont(font)
+
+    metrics = QFontMetrics(font)
+    lines = format_hud_lines(snapshot)
+    line_height = metrics.lineSpacing()
+    text_width = max(metrics.horizontalAdvance(line) for line in lines)
+
+    margin = max(4, int(round(config.margin * screen_height / 1080.0)))
+    padding = max(2, margin // 2)
+
+    # The width of the HUD is needed to place it in the corner, so the
+    # painter needs the size of the widget.
+    width = painter.device().width()
+    box_width = text_width + 2 * padding
+    box_height = len(lines) * line_height + 2 * padding
+
+    bg = QColor(config.background_color)
+    bg.setAlpha(int(config.background_alpha))
+    painter.fillRect(
+        QRect(width - box_width - margin, margin, box_width, box_height), bg
+    )
+
+    painter.setPen(QPen(QColor(config.text_color)))
+    y = margin + padding
+    for line in lines:
+        painter.drawText(
+            QRect(width - box_width - margin + padding, y, text_width, line_height),
+            int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            line,
+        )
+        y += line_height
+
+
 def paint_overlay(
     painter: QPainter,
     state: OverlayState,
     config: OverlayConfig,
+    hud_config: Optional[HUDConfig] = None,
 ) -> None:
     """Draw every translation block and the ON/OFF status.
 
@@ -166,13 +218,19 @@ def paint_overlay(
             "TRANSLATING" if state.active else "OFF",
         )
 
+    if state.hud is not None and hud_config is not None:
+        paint_hud(painter, state.hud, hud_config, height)
+
 
 class OverlayWidget(QWidget):
     """The transparent window that draws the translations."""
 
-    def __init__(self, config: OverlayConfig) -> None:
+    def __init__(
+        self, config: OverlayConfig, hud_config: Optional[HUDConfig] = None
+    ) -> None:
         super().__init__()
         self.config = config
+        self.hud_config = hud_config
         self._state = OverlayState()
         self.setWindowFlags(
             Qt.WindowType.FramelessWindowHint
@@ -240,13 +298,15 @@ class OverlayWidget(QWidget):
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt API
         """Draw every translation block and the ON/OFF status."""
         painter = QPainter(self)
-        paint_overlay(painter, self._state, self.config)
+        paint_overlay(painter, self._state, self.config, self.hud_config)
         painter.end()
 
 
-def create_overlay(config: OverlayConfig) -> OverlayWidget:
+def create_overlay(
+    config: OverlayConfig, hud_config: Optional[HUDConfig] = None
+) -> OverlayWidget:
     """Create the overlay widget (must be called in the UI thread)."""
-    widget = OverlayWidget(config)
+    widget = OverlayWidget(config, hud_config)
     widget.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
     widget.show()
     widget.setWindowOpacity(1.0)

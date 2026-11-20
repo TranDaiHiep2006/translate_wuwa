@@ -8,19 +8,27 @@ Rules implemented here:
 * A speaker name is either
   - the part before a colon inside the same line (``Name: dialogue``), or
   - a short, capitalised line (1-3 words, no sentence-ending period) sitting
-  directly above the dialogue block.
+    directly above the dialogue block.
 * A speaker name is **never** a blacklisted UI label (Quest, Skill, ...) and
   it is only accepted when it is in the character roster or when it ends with
   a colon (see :mod:`src.speakers`).
 
 The speaker name is never translated and is never invented.
+
+P3 (item D): the two vertical gaps are not fixed pixel values any more. They
+are derived from the **measured font height** of the current frame (the
+median height of the OCR bboxes, which is robust against the outliers), so
+the grouping also works when the game uses a font that is smaller than the
+one of the fixtures. The reference 1080p values stay as the fallback when no
+text was detected yet.
 """
 
 from __future__ import annotations
 
 import re
+import statistics
 from dataclasses import dataclass, field
-from typing import List, Optional, Tuple
+from typing import List, Optional, Sequence, Tuple
 
 from .ocr import OCRLine
 from .speakers import DEFAULT_VOCABULARY, SpeakerVocabulary, looks_like_name
@@ -68,6 +76,47 @@ class TextBlock:
         """Stable identity of the block (used to detect stale overlays)."""
         x1, y1, x2, y2 = self.bbox
         return f"{x1},{y1},{x2},{y2}"
+
+
+def measure_font_height(lines: Sequence[OCRLine]) -> Optional[int]:
+    """Estimate the font height of a frame from the OCR bboxes.
+
+    The **median** height of the detected lines is used, because it is robust
+    against the outliers (a HUD icon, a damage number or a wrongly detected
+    box would not move the median). Returns None when there is no line at
+    all.
+    """
+    heights = [line.height for line in lines if line.height > 0]
+    if not heights:
+        return None
+    return int(round(statistics.median(heights)))
+
+
+def adaptive_gaps(
+    lines: Sequence[OCRLine],
+    reference_group_gap: int,
+    reference_speaker_gap: int,
+    group_ratio: float = 0.55,
+    speaker_ratio: float = 1.6,
+    scale: float = 1.0,
+    min_lines: int = 2,
+) -> Tuple[int, int]:
+    """Return the grouping gaps to use for the current frame.
+
+    When the font height could be measured, the gaps are a fraction of it
+    (``font_height * group_ratio``), so a smaller font produces smaller gaps
+    and the same grouping. Otherwise the reference 1080p values are used
+    (scaled to the real resolution).
+    """
+    height = measure_font_height(lines)
+    if height is None or len(lines) < int(min_lines):
+        return (
+            max(1, int(round(reference_group_gap * scale))),
+            max(1, int(round(reference_speaker_gap * scale))),
+        )
+    group_gap = max(1, int(round(height * float(group_ratio))))
+    speaker_gap = max(1, int(round(height * float(speaker_ratio))))
+    return group_gap, speaker_gap
 
 
 def group_lines(
@@ -152,9 +201,6 @@ def detect_speaker(
         if 0 <= gap <= max_gap:
             return previous_line.text.strip()
     return None
-
-
-_COLON = ":"
 
 
 def build_blocks(

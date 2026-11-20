@@ -80,3 +80,33 @@ def reward_image(fixture_dir: Path):
 def ui_menu_image(fixture_dir: Path):
     """A menu with the Quest / Skill / Inventory / Settings labels."""
     return _load(fixture_dir / "sample_g_ui_menu.png")
+
+
+@pytest.fixture(scope="session")
+def two_corner_base(fixture_dir: Path):
+    """The reference frame of the two-corner test (P3 fixture h)."""
+    return _load(fixture_dir / "sample_h_two_corner_base.png")
+
+
+@pytest.fixture(scope="session")
+def two_corner_changed(fixture_dir: Path):
+    """The same frame with the text of both corners changed (P3 fixture h)."""
+    return _load(fixture_dir / "sample_h_two_corner_changed.png")
+
+
+@pytest.fixture(scope="session")
+def small_font_image(fixture_dir: Path):
+    """The dialogue fixture with a 0.7x font (P3 fixture i)."""
+    return _load(fixture_dir / "sample_i_small_font.png")
+
+
+@pytest.fixture(scope="session")
+def big_change_base(fixture_dir: Path):
+    """The reference frame of the big screen change test (P3 fixture j)."""
+    return _load(fixture_dir / "sample_j_big_change_base.png")
+
+
+@pytest.fixture(scope="session")
+def big_change(fixture_dir: Path):
+    """The same frame with a big menu opened over the screen (P3 fixture j)."""
+    return _load(fixture_dir / "sample_j_big_change.png")

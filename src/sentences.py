@@ -25,10 +25,16 @@ NUMBER_TOKEN = "XNUM{index}X"
 PERCENT_TOKEN = "XPCT{index}X"
 
 # A number, a decimal, a percentage or a number with a thousands separator.
-#   12000   15   3.5   12,000   15%   1,234.56
+#   12000   15   3.5   12,000   15%   1,234.56   3,5
+#
+# The comma group is greedy ("1,2345" stays one token), so a number with a
+# thousands separator ("1,234") and a decimal comma ("3,5") are both kept
+# in one piece. The dot is only a part of the number when a digit follows it.
 _NUMBER_RE = re.compile(
-    r"(?<![\w.])"
-    r"(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?"
+    r"(?<![\w])"
+    r"(?<!\.\d)"
+    r"\d+(?:,\d+)*"
+    r"(?:\.\d+)?"
     r"%?"
     r"(?![\w])"
 )
@@ -39,13 +45,21 @@ _ABBREVIATIONS = {
     "mr",
     "mrs",
     "ms",
+    "miss",
+    "mx",
     "dr",
+    "prof",
     "st",
     "vs",
     "etc",
     "e.g",
     "i.e",
+    "cf",
+    "ca",
     "no",
+    "nos",
+    "fig",
+    "figs",
     "lv",
     "hp",
     "mp",
@@ -58,8 +72,129 @@ _ABBREVIATIONS = {
     "approx",
     "dept",
     "est",
+    "al",
+    "inc",
+    "ltd",
+    "vol",
+    "ch",
+    "pp",
+    "op",
+    "min",
+    "max",
+    "avg",
+    "tel",
+    "ext",
+    # -- added by P3 (item G) --------------------------------------------
+    "rev",
+    "gen",
+    "col",
+    "capt",
+    "sgt",
+    "lt",
+    "gov",
+    "sen",
+    "rep",
+    "supt",
+    "det",
+    "insp",
+    "cmdr",
+    "adm",
+    "maj",
+    "cpl",
+    "pvt",
+    "fr",
+    "am",
+    "pm",
+    "phd",
+    "md",
+    "ba",
+    "bsc",
+    "msc",
+    "jan",
+    "feb",
+    "mar",
+    "apr",
+    "jun",
+    "jul",
+    "aug",
+    "sep",
+    "sept",
+    "oct",
+    "nov",
+    "dec",
+    "mon",
+    "tue",
+    "wed",
+    "thu",
+    "fri",
+    "sat",
+    "sun",
+    "ave",
+    "blvd",
+    "rd",
+    "apt",
+    "sq",
+    "ft",
+    "mt",
+    "univ",
+    "assn",
+    "bros",
+    "mfg",
+    "dist",
+    "govt",
+    "intl",
+    "natl",
+    "econ",
+    "psych",
+    "phys",
+    "math",
+    "chem",
+    "biol",
+    "eng",
+    "mfg",
+    "mgmt",
+    "admin",
+    "acct",
+    "dept",
+    "asst",
+    "assoc",
+    "pres",
+    "supt",
+    "rep",
+    "sec",
+    "ref",
+    "vol",
+    "ed",
+    "eds",
+    "pp",
+    "para",
+    "chap",
+    "sec",
     "fig",
+    "figs",
+    "eq",
+    "ref",
+    "sec",
+    "vol",
+    "ch",
+    "no",
+    "nos",
+    "para",
+    "art",
+    "arts",
+    "sec",
+    "hr",
+    "hrd",
+    "dept",
+    "intl",
+    "natl",
+    "assn",
+    "bros",
 }
+
+# A chain of initials ("U.S", "A.M", "J.R.R"): the dot of an initial is
+# never the end of a sentence.
+_INITIALS_CHAIN_RE = re.compile(r"(?:^|\s)(?:[A-Za-z]\.)+[A-Za-z]$")
 
 # The end of a sentence: a dot, an exclamation or a question mark, followed by
 # a space and an upper-case letter (or the end of the text).
@@ -75,6 +210,63 @@ class Sentence:
 
     def __str__(self) -> str:  # pragma: no cover - debugging helper
         return f"{self.text}{self.separator!r}"
+
+
+def split_with_stanza(text: str) -> List[Sentence]:
+    """Split ``text`` with the Stanza sentence boundary detector.
+
+    Stanza is the splitter Argos uses internally, so this gives the same
+    boundaries as the model itself. It is **slower** than the regex splitter
+    (the pipeline has to be loaded), so it is only used as a fallback.
+
+    The separators are the whitespace that follows each sentence, so the
+    sentences can be rejoined exactly like the regex splitter does.
+    """
+    if not text or not text.strip():
+        return []
+
+    try:
+        import stanza
+    except Exception:  # pragma: no cover - stanza is optional
+        return split_sentences(text)
+
+    try:
+        document = stanza.Document([], text=text)  # type: ignore[call-arg]
+        sentences = document.sentences
+    except Exception:  # pragma: no cover - depends on the installed models
+        return split_sentences(text)
+
+    if not sentences:
+        return split_sentences(text)
+
+    result: List[Sentence] = []
+    cursor = 0
+    for sentence in sentences:
+        body = sentence.text
+        start = text.find(body, cursor)
+        if start < 0:
+            start = cursor
+        cursor = start + len(body)
+        separator = ""
+        index = cursor
+        while index < len(text) and text[index].isspace():
+            separator += text[index]
+            index += 1
+        result.append(Sentence(text=body, separator=separator))
+    return result
+
+
+def get_splitter(name: str = "regex"):
+    """Return the sentence splitter to use.
+
+    ``"regex"`` is the default: it is fast, it never loads a model and it
+    never splits inside a number or an abbreviation. ``"stanza"`` is the
+    fallback: it uses the same boundary detector as the translation model,
+    but it is slower and it needs the Stanza models to be installed.
+    """
+    if str(name).lower() == "stanza":
+        return split_with_stanza
+    return split_sentences
 
 
 @dataclass
@@ -138,6 +330,74 @@ def _is_abbreviation_boundary(text: str, position: int) -> bool:
     return word.strip() in _ABBREVIATIONS
 
 
+def _is_initials_boundary(text: str, position: int) -> bool:
+    """Return True when the dot at ``position`` ends a chain of initials.
+
+    "U.S." and "A.M." are not sentence boundaries, even when the chain is not
+    in the abbreviation list. The chain has to end exactly at the dot.
+    """
+    # The text of the word that holds the dot.
+    start = max(
+        text.rfind(" ", 0, position), text.rfind("\n", 0, position)
+    )
+    word = text[start + 1 : position + 1]
+    # "U.S." -> the chain without the last dot.
+    if len(word) < 3:
+        return False
+    if not _INITIALS_CHAIN_RE.match(" " + word[:-1]):
+        return False
+    # The chain must not be followed by a lower-case letter, otherwise it is
+    # an ordinary word like "e.g" that is not in the list.
+    after = text[position + 1 : position + 2]
+    return not (after.isalpha() and after.islower())
+
+
+def _is_numeric_boundary(text: str, position: int) -> bool:
+    """Return True when the dot at ``position`` is inside a number.
+
+    That is the case for a decimal ("3.5"), a decimal comma ("3,5") and a
+    number with a thousands separator ("1,234").
+    """
+    before = text[max(0, position - 1) : position]
+    after = text[position + 1 : position + 2]
+    if before.isdigit() and after.isdigit():
+        return True
+    return False
+
+
+def _is_comma_boundary(text: str, position: int) -> bool:
+    """Return True when the comma at ``position`` is inside a number.
+
+    A decimal comma ("3,5") and a thousands separator ("1,234") must never
+    split a sentence. A comma that is followed by a space is a normal comma
+    and it does split the sentence.
+    """
+    before = text[max(0, position - 1) : position]
+    after = text[position + 1 : position + 2]
+    if not before.isdigit():
+        return False
+    if after.isdigit():
+        # "3,5" or "1,234": the digits on both sides are never a boundary.
+        return True
+    # "1,234." - the comma is a thousands separator when the digits that
+    # follow are exactly three and the ones before are one to three.
+    if after == " ":
+        return False
+    return False
+
+
+def _is_numeric_text(text: str) -> bool:
+    """Return True when the whole text is a number.
+
+    That is the case for "12000", "1,234" and "3.5": a block that is only a
+    number is never split.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return False
+    return bool(_NUMBER_RE.fullmatch(stripped))
+
+
 def split_sentences(text: str) -> List[Sentence]:
     """Split ``text`` into sentences.
 
@@ -164,8 +424,10 @@ def split_sentences(text: str) -> List[Sentence]:
             continue
         if _is_abbreviation_boundary(text, dot):
             continue
-        # Never split inside a number ("3.5" or "1,234.56").
-        if text[dot - 1 : dot + 1] == ".5" or re.match(r"\d\.\d", text[max(0, dot - 3) : dot + 2]):
+        if _is_initials_boundary(text, dot):
+            continue
+        # Never split inside a number ("3.5", "3,5" or "1,234.56").
+        if _is_numeric_boundary(text, dot):
             continue
 
         chunk = text[start:end]

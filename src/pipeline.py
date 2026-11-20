@@ -3,6 +3,16 @@
 
 The pipeline measures the time spent in every stage so ``scripts/bench.py`` can
 print real numbers.
+
+P3 changes:
+
+* **Item A** - the changed area is split into several disjoint regions that
+  are read in parallel, and the scheduled refresh reads the frame as a grid of
+  tiles (only the changed tiles are read).
+* **Item B** - the frame differencing runs on a downscaled frame.
+* **Item C** - the translation runs in a background thread, so the OCR of the
+  next frame overlaps the translation of the current one.
+* **Item D** - the grouping gaps are derived from the measured font height.
 """
 
 from __future__ import annotations
@@ -16,18 +26,27 @@ import numpy as np
 
 from .cache import TranslationCache, normalize
 from .capture import Frame
-from .change import frame_diff
+from .change import DiffResult, frame_diff, refine_mask, scale_box
 from .config import Config
 from .filter import FilterReport, filter_lines
 from .glossary import Glossary
-from .grouping import TextBlock, build_blocks
-from .ocr import OCREngine
+from .grouping import TextBlock, adaptive_gaps, build_blocks
+from .ocr import OCREngine, OCRLine
 from .roi import (
     ROI_CROP,
     ROI_FULL,
     ROI_SKIP,
+    ROI_TILES,
     ROIResult,
+    TileResult,
+    bbox_area,
+    bbox_union,
+    changed_area,
     compute_roi,
+    compute_tiles,
+    connected_regions,
+    dedupe_lines,
+    merge_small_regions,
     offset_lines,
 )
 from .sentences import (
@@ -46,7 +65,11 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class StageTimings:
-    """Time spent in every stage of one pipeline iteration (milliseconds)."""
+    """Time spent in every stage of one pipeline iteration (milliseconds).
+
+    The HUD and the bench script read the very same object, so the numbers
+    on the screen are the numbers of the benchmark.
+    """
 
     capture: float = 0.0
     diff: float = 0.0
@@ -68,6 +91,17 @@ class StageTimings:
             "render": round(self.render, 2),
             "total": round(self.total, 2),
         }
+
+    def add(self, other: "StageTimings") -> None:
+        """Add the timings of another iteration to this one."""
+        self.capture += other.capture
+        self.diff += other.diff
+        self.ocr += other.ocr
+        self.filter += other.filter
+        self.group += other.group
+        self.translate += other.translate
+        self.render += other.render
+        self.total += other.total
 
 
 @dataclass
@@ -99,6 +133,12 @@ class PipelineResult:
     newly_translated: List[TranslatedBlock] = field(default_factory=list)
     roi_action: str = ROI_FULL
     roi_rect: Optional[Tuple[int, int, int, int]] = None
+    roi_regions: List[Tuple[int, int, int, int]] = field(default_factory=list)
+    tiles_read: int = 0
+    tiles_total: int = 0
+    # The blocks whose translation was handed over to the background
+    # translator (item C of P3). They are not translated yet.
+    pending_blocks: List[TextBlock] = field(default_factory=list)
 
 
 class Translator:
@@ -287,7 +327,11 @@ class Pipeline:
         vocabulary: Optional[SpeakerVocabulary] = None,
     ) -> None:
         self.config = config
-        self.ocr_engine = ocr_engine or OCREngine(device=config.translation.device)
+        self.ocr_engine = ocr_engine or OCREngine(
+            device=config.translation.device,
+            intra_threads=config.ocr_intra_threads,
+            pool_size=max(config.roi_workers, config.tile_workers),
+        )
         self.translator = translator
         if vocabulary is None and config.speaker.enabled:
             vocabulary = SpeakerVocabulary.from_files(
@@ -305,6 +349,33 @@ class Pipeline:
         # The full frame is re-read every X ms / X frames.
         self._last_full_ocr: float = 0.0
         self._frames_since_full: int = 0
+        # The background translator (item C of P3). When it is set, the
+        # translation of a frame happens in that thread and overlaps the OCR
+        # of the next frame.
+        self._async_translator = None
+        # The timestamp of the frame that is being processed.
+        self._frame_captured_at: float = 0.0
+
+    # -- async translation --------------------------------------------------
+    def set_async_translator(self, async_translator) -> None:
+        """Use a background translator instead of the blocking one."""
+        self._async_translator = async_translator
+
+    def _submit_async(self, blocks: List[TextBlock]) -> None:
+        """Hand the blocks over to the background translator."""
+        if self._async_translator is None:
+            return
+        self._async_translator.submit(blocks, captured_at=self._frame_captured_at)
+
+    def collect_translations(self) -> List[TranslatedBlock]:
+        """Return the translations that the background worker has finished.
+
+        Never blocks: the results that are not ready stay in the worker and
+        are collected by the next call.
+        """
+        if self._async_translator is None:
+            return []
+        return [outcome.item for outcome in self._async_translator.collect()]
 
     # -- helpers -----------------------------------------------------------
     def _scale(self, screen_height: int) -> float:
@@ -332,6 +403,9 @@ class Pipeline:
         timings = StageTimings()
         timings.capture = capture_ms
         total_start = time.perf_counter()
+        # The timestamp of the capture: it is the start of the "visible on
+        # screen" measurement of item C.
+        self._frame_captured_at = frame.timestamp or total_start
 
         scale = self._scale(frame.height)
 
@@ -341,6 +415,7 @@ class Pipeline:
             frame.image,
             self._previous_frame,
             threshold=self.config.diff_threshold,
+            downscale=self.config.diff_downscale,
         )
         timings.diff = (time.perf_counter() - t0) * 1000.0
 
@@ -364,12 +439,7 @@ class Pipeline:
 
         # -- OCR -------------------------------------------------------------
         t0 = time.perf_counter()
-        if roi.action == ROI_CROP and roi.roi is not None:
-            x1, y1, x2, y2 = roi.roi
-            crop = frame.image[y1:y2, x1:x2]
-            lines = offset_lines(self.ocr_engine.read_roi(crop), x1, y1)
-        else:
-            lines = self.ocr_engine.read(frame.image)
+        lines, tiles_read, tiles_total = self._read_text(frame, diff, roi)
         timings.ocr = (time.perf_counter() - t0) * 1000.0
 
         if roi.action == ROI_FULL:
@@ -387,11 +457,12 @@ class Pipeline:
 
         # -- grouping --------------------------------------------------------
         t0 = time.perf_counter()
+        group_gap, speaker_gap = self._grouping_gaps(kept, scale)
         blocks = build_blocks(
             kept,
-            gap_px=self.config.group_gap_px,
-            speaker_gap_px=self.config.speaker_gap_px,
-            scale=scale,
+            gap_px=group_gap,
+            speaker_gap_px=speaker_gap,
+            scale=1.0,
             max_words=self.config.speaker_max_words,
             vocabulary=self.vocabulary,
         )
@@ -448,19 +519,29 @@ class Pipeline:
                 )
 
         if to_translate and self.translator is not None:
-            self.translator.clear_sentence_cache()
-            translated = self.translator.translate_texts(
-                [b.text for _, b in to_translate]
-            )
-            for position, (index, block) in enumerate(to_translate):
-                item = TranslatedBlock(
-                    block=block,
-                    translation=translated[position],
-                    speaker=block.speaker,
-                    from_cache=False,
+            if self._async_translator is not None:
+                # Item C of P3: the translation happens in the background
+                # thread, so the OCR of the next frame overlaps it.
+                pending = [block for _, block in to_translate]
+                for index, block in to_translate:
+                    results[index] = TranslatedBlock(
+                        block=block, translation="", speaker=block.speaker
+                    )
+                self._submit_async(pending)
+            else:
+                self.translator.clear_sentence_cache()
+                translated = self.translator.translate_texts(
+                    [b.text for _, b in to_translate]
                 )
-                results[index] = item
-                newly.append(item)
+                for position, (index, block) in enumerate(to_translate):
+                    item = TranslatedBlock(
+                        block=block,
+                        translation=translated[position],
+                        speaker=block.speaker,
+                        from_cache=False,
+                    )
+                    results[index] = item
+                    newly.append(item)
         timings.translate = (time.perf_counter() - t0) * 1000.0
 
         # Blocks that are still settling keep their previous translation.
@@ -492,8 +573,143 @@ class Pipeline:
             newly_translated=newly,
             roi_action=roi.action,
             roi_rect=roi.roi,
+            roi_regions=list(roi.regions),
+            tiles_read=tiles_read,
+            tiles_total=tiles_total,
         )
         return result
+
+    # -- OCR helpers -------------------------------------------------------
+    def _grouping_gaps(self, lines: List[OCRLine], scale: float) -> Tuple[int, int]:
+        """Return the grouping gaps to use for this frame.
+
+        With the adaptive grouping on (the default), the gaps are derived
+        from the measured font height of the frame. Otherwise the reference
+        1080p values are used, scaled to the real resolution.
+        """
+        config = self.config
+        if not config.adaptive_grouping:
+            return (
+                max(1, int(round(config.group_gap_px * scale))),
+                max(1, int(round(config.speaker_gap_px * scale))),
+            )
+        return adaptive_gaps(
+            lines,
+            reference_group_gap=config.group_gap_px,
+            reference_speaker_gap=config.speaker_gap_px,
+            group_ratio=config.group_gap_ratio,
+            speaker_ratio=config.speaker_gap_ratio,
+            scale=scale,
+            min_lines=config.adaptive_min_lines,
+        )
+
+    def _read_text(
+        self, frame: Frame, diff: DiffResult, roi: ROIResult
+    ) -> Tuple[List[OCRLine], int, int]:
+        """Read the text of the frame and return the lines.
+
+        Three modes:
+
+        * the whole frame (first frame, or a change that covers most of the
+          screen);
+        * the **tiles** of the scheduled refresh: only the changed tiles are
+          read;
+        * the **regions** of the changed area: the disjoint rectangles are
+          read in parallel and merged with the full-screen coordinates.
+        """
+        config = self.config
+        image = frame.image
+
+        # -- the whole frame ------------------------------------------------
+        if roi.action == ROI_FULL:
+            return self._read_whole_frame(frame), 0, 0
+
+        # -- the tiled refresh ----------------------------------------------
+        if roi.action == ROI_TILES:
+            return self._read_tiles(frame, diff)
+
+        # -- the per-region ROI ---------------------------------------------
+        regions = roi.read_rects
+        if not regions:
+            return [], 0, 0
+
+        crops = [image[y1:y2, x1:x2] for (x1, y1, x2, y2) in regions]
+        if len(crops) == 1:
+            x1, y1, _x2, _y2 = regions[0]
+            lines = offset_lines(self.ocr_engine.read_roi(crops[0]), x1, y1)
+            return lines, 0, 0
+
+        results = self.ocr_engine.read_parallel(
+            crops, intra_threads=self.config.ocr_intra_threads
+        )
+        merged: List[OCRLine] = []
+        for (x1, y1, _x2, _y2), crop_lines in zip(regions, results):
+            merged.extend(offset_lines(crop_lines, x1, y1))
+        merged.sort(key=lambda ln: (ln.top, ln.left))
+        return dedupe_lines(merged), 0, 0
+
+    def _read_tiles(
+        self, frame: Frame, diff: DiffResult
+    ) -> Tuple[List[OCRLine], int, int]:
+        """Read the changed tiles of the frame.
+
+        The **detection** runs once on a downscaled copy of the whole frame
+        and the **recognition** runs only on the text lines that fall into a
+        changed tile, in parallel. The detection is done on the whole frame
+        and not inside each tile, because a detection inside a tile cuts
+        the text lines that cross the tile border (measured on the fixture
+        (j): "Cost 25 Astrite" became "Cost 25 As").
+
+        When more than half of the tiles changed, the whole frame is read
+        instead (reading the whole frame is then cheaper than reading more
+        than half of the tiles).
+        """
+        config = self.config
+        tile_result: TileResult = compute_tiles(
+            diff.diff_mask,
+            frame.width,
+            frame.height,
+            config.tile_cols,
+            config.tile_rows,
+            changed_threshold=config.tile_changed_threshold,
+            scale_factor=diff.scale_factor,
+        )
+
+        if tile_result.changed_ratio > config.tile_full_frame_ratio:
+            # More than half of the tiles changed: read the whole frame.
+            lines = self._read_whole_frame(frame)
+            return lines, len(tile_result.tiles), len(tile_result.tiles)
+
+        rects = tile_result.changed_tiles
+        if not rects:
+            return [], 0, len(tile_result.tiles)
+
+        lines = self.ocr_engine.read_tiles(
+            frame.image,
+            rects,
+            detect_scale=config.ocr_detect_scale,
+            workers=config.tile_workers,
+            intra_threads=config.tile_intra_threads,
+        )
+        return lines, len(rects), len(tile_result.tiles)
+
+    def _read_whole_frame(self, frame: Frame) -> List[OCRLine]:
+        """Read the whole frame with the two-step strategy.
+
+        The detection runs on a downscaled copy of the frame and the
+        recognition on the crops of the original frame, in parallel. This is
+        faster than the plain call (measured on the fixture (j): 972 ms ->
+        437 ms) and it finds the same text.
+        """
+        config = self.config
+        if not config.ocr_two_step:
+            return self.ocr_engine.read(frame.image)
+        return self.ocr_engine.read_detect_recognize(
+            frame.image,
+            detect_scale=config.ocr_detect_scale,
+            workers=config.ocr_rec_workers,
+            intra_threads=config.ocr_rec_intra_threads,
+        )
 
     # -- known blocks ------------------------------------------------------
     def _find_known(self, text: str) -> Optional[TranslatedBlock]:
@@ -505,7 +721,133 @@ class Pipeline:
         return None
 
     # -- ROI helpers -------------------------------------------------------
-    def _decide_roi(self, diff, frame: Frame) -> ROIResult:
+    def _regions_from_mask(
+        self,
+        mask: Optional[np.ndarray],
+        diff: DiffResult,
+        frame: Frame,
+    ) -> ROIResult:
+        """Find the changed regions of the frame.
+
+        The connected components of the diff mask are computed and the ones
+        that are too small are merged into their nearest neighbour. When the
+        mask is the downscaled one, the rectangles are scaled back to the
+        full resolution, so the coordinates are always the screen
+        coordinates.
+        """
+        config = self.config
+        screen_area = frame.width * frame.height
+        factor = max(1, diff.scale_factor)
+
+        if mask is None:
+            return ROIResult(
+                action=ROI_FULL,
+                changed_area=screen_area,
+                screen_area=screen_area,
+                reason="no diff mask (first frame or resolution change)",
+            )
+
+        area = changed_area(mask)
+        # The mask may be downscaled: the ratio is always computed against
+        # the screen, never against the size of the mask.
+        ratio = area / float(mask.size) if mask.size else 0.0
+        if area <= 0:
+            return ROIResult(
+                action=ROI_SKIP,
+                changed_area=0,
+                screen_area=screen_area,
+                reason="no changed pixels",
+            )
+
+        if ratio > float(config.roi_full_frame_threshold):
+            return ROIResult(
+                action=ROI_FULL,
+                changed_area=area,
+                screen_area=screen_area,
+                reason=f"changed area {ratio:.1%} > {float(config.roi_full_frame_threshold):.0%}",
+            )
+
+        components = connected_regions(mask)
+        if not components:
+            return ROIResult(
+                action=ROI_SKIP,
+                changed_area=area,
+                screen_area=screen_area,
+                reason="no connected region",
+            )
+
+        scale = self._scale(frame.height)
+        # The minimum area of a region is expressed in full resolution
+        # pixels, so it is divided by the factor of the downscaled mask.
+        region_min_area = int(
+            round(config.roi_region_min_area * scale * scale) / (factor * factor)
+        )
+        # The merge gap is a full resolution distance too, so it is divided
+        # by the factor of the downscaled mask as well.
+        merge_gap = int(
+            round(config.scale(config.roi_region_merge_gap, frame.height)) / factor
+        )
+        regions = merge_small_regions(
+            components,
+            region_min_area,
+            frame.width,
+            frame.height,
+            merge_gap=merge_gap,
+        )
+
+        # The rectangles are scaled back to the full resolution and padded.
+        padding = int(round(config.scale(config.roi_padding_px, frame.height)))
+        scaled = [
+            scale_box(box, factor, frame.width, frame.height) for box in regions
+        ]
+        # A changed line only covers the glyphs that really changed, so the
+        # region is widened: the OCR has to be able to read the whole line.
+        min_width = int(round(config.scale(config.roi_region_min_width, frame.height)))
+        widened = []
+        for box in scaled:
+            if (box[2] - box[0]) < min_width:
+                extra = (min_width - (box[2] - box[0])) // 2
+                x1 = max(0, box[0] - extra)
+                x2 = min(frame.width, box[2] + extra)
+                box = (x1, box[1], x2, box[3])
+            widened.append(box)
+        padded = [
+            (
+                max(0, box[0] - padding),
+                max(0, box[1] - padding),
+                min(frame.width, box[2] + padding),
+                min(frame.height, box[3] + padding),
+            )
+            for box in widened
+        ]
+        min_area = int(round(config.roi_min_area * scale * scale))
+        padded = [box for box in padded if bbox_area(box) >= min_area]
+
+        if not padded:
+            return ROIResult(
+                action=ROI_SKIP,
+                changed_area=area,
+                screen_area=screen_area,
+                reason=f"every region is smaller than {min_area} px",
+            )
+
+        if len(padded) > int(config.roi_max_regions):
+            padded = sorted(padded, key=bbox_area, reverse=True)[
+                : int(config.roi_max_regions)
+            ]
+            padded.sort(key=lambda b: (b[1], b[0]))
+
+        return ROIResult(
+            action=ROI_CROP,
+            roi=bbox_union(padded),
+            # The changed area is expressed in full resolution pixels.
+            changed_area=area * factor * factor,
+            screen_area=screen_area,
+            reason=f"{len(padded)} changed region(s), {ratio:.2%} of the screen",
+            regions=padded,
+        )
+
+    def _decide_roi(self, diff: DiffResult, frame: Frame) -> ROIResult:
         """Decide what the OCR has to read for this frame."""
         config = self.config
         screen_area = frame.width * frame.height
@@ -525,21 +867,49 @@ class Pipeline:
         )
         self._frames_since_full += 1
 
-        scale = self._scale(frame.height)
-        roi = compute_roi(
-            diff.diff_mask,
-            padding=int(round(config.scale(config.roi_padding_px, frame.height))),
-            width=frame.width,
-            height=frame.height,
-            min_area=int(round(config.roi_min_area * scale * scale)),
-            full_frame_threshold=config.roi_full_frame_threshold,
-        )
+        if config.roi_regions_enabled:
+            roi = self._regions_from_mask(diff.diff_mask, diff, frame)
+        else:
+            scale = self._scale(frame.height)
+            roi = compute_roi(
+                diff.diff_mask,
+                padding=int(round(config.scale(config.roi_padding_px, frame.height))),
+                width=frame.width,
+                height=frame.height,
+                min_area=int(round(config.roi_min_area * scale * scale)),
+                full_frame_threshold=config.roi_full_frame_threshold,
+            )
 
         if need_full and roi.action == ROI_CROP:
-            # The periodic full frame refresh catches the text the ROI missed.
-            roi.action = ROI_FULL
+            # The scheduled refresh catches the text the ROI missed.
+            if config.tiles_enabled:
+                roi.action = ROI_TILES
+                roi.roi = None
+                roi.regions = []
+                roi.reason = "scheduled tiled refresh"
+            else:
+                roi.action = ROI_FULL
+                roi.roi = None
+                roi.regions = []
+                roi.reason = roi.reason + " (scheduled full refresh)"
+        elif need_full and roi.action == ROI_SKIP and config.tiles_enabled:
+            # Nothing changed in the regions, but the scheduled refresh
+            # still has to run: the tiled refresh reads the changed tiles
+            # of the whole screen, not only the changed regions.
+            roi.action = ROI_TILES
             roi.roi = None
-            roi.reason = roi.reason + " (periodic full refresh)"
+            roi.regions = []
+            roi.reason = "scheduled tiled refresh"
+        elif roi.action == ROI_CROP and config.tiles_enabled:
+            # A big change (a menu that opens, for example) is read as a
+            # grid of tiles in parallel: that is much faster than reading
+            # one huge rectangle.
+            ratio = roi.changed_ratio
+            if ratio >= float(config.roi_tiles_threshold):
+                roi.action = ROI_TILES
+                roi.roi = None
+                roi.regions = []
+                roi.reason = f"tiled refresh ({ratio:.1%} of the screen changed)"
         return roi
 
     # -- block merging -----------------------------------------------------
@@ -591,7 +961,7 @@ class Pipeline:
                 kept.append(old)
                 continue
 
-            # A full frame refresh knows the whole screen: the text is gone.
+            # A refresh that knows the whole screen: the text is gone.
             # The block is removed after two confirmations.
             count = self._missing.get(old_key, 0) + 1
             self._missing[old_key] = count
@@ -611,3 +981,9 @@ class Pipeline:
         # it change when the pipeline is reset.
         self._known = list(merged)
         return merged
+
+
+def bbox_area(box: Tuple[int, int, int, int]) -> int:
+    """Return the area of a bounding box in pixels."""
+    x1, y1, x2, y2 = box
+    return max(0, int(x2) - int(x1)) * max(0, int(y2) - int(y1))
