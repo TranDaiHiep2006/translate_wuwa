@@ -1206,7 +1206,7 @@ good trade for not losing a character.
 | The display change is detected, the capture restarts cleanly on the new monitor, and the overlay follows with the correct resolution, font and bbox scaling | **PASS (with the limitation of section 6)** | `tests/test_display.py` (11 tests); see section 6 for what dxcam can and cannot do. |
 | The tool still translates with the network disconnected | **PASS** | `tests/test_offline.py` blocks every socket and still translates. No new network call was added in P3. |
 | No online API calls, no API key in code/config. No game memory reading, no injection, no DLL, no game file modification. | **PASS** | `tests/test_offline.py::test_no_api_key_is_configured`; P3 only reads the screen with the same two backends. |
-| The code is pushed to GitHub | see section 9 | |
+| The code is pushed to GitHub | **PASS** | `12b3e14` on `origin/main`; the main commit is `6b3e64a` (section 9) |
 
 ---
 
@@ -1347,22 +1347,31 @@ median of 7 runs with min/max).
 
 ## 9. The commit and the push
 
-**Commit:** `6b3e64a` - *"P3: two-step OCR read, tiled refresh, per-region ROI,
-async pipeline, adaptive grouping, HUD and hot-plug"*
+**The main commit:** `6b3e64a` - *"P3: two-step OCR read, tiled refresh,
+per-region ROI, async pipeline, adaptive grouping, HUD and hot-plug"*
 
 **GitHub:** <https://github.com/TranDaiHiep2006/translate_wuwa/commit/6b3e64ad788c7522c503fcc77e5942b7213d78fd>
 
-**The push succeeded.** The remote `origin/main` is at `6b3e64a`, the same
+**The push succeeded.** The remote `origin/main` is at `12b3e14`, the same
 commit as the local `HEAD`:
 
 ```
 $ git push origin main
 To https://github.com/TranDaiHiep2006/translate_wuwa
    430b736..6b3e64a  main -> main
+   6b3e64a..56d3817  main -> main
+   56d3817..12b3e14  main -> main
 ```
 
-The P3 work is therefore in **one commit** on top of the P2 HEAD (`430b736`).
-The P1/P2 history is untouched.
+The three P3 commits are:
+
+| Commit | Content |
+| --- | --- |
+| `6b3e64a` | the code, the fixtures, the tests and the documentation |
+| `56d3817` | the commit hash and the GitHub link in this report |
+| `12b3e14` | the run-to-run variance of the benchmark in this report |
+
+They sit on top of the P2 HEAD (`430b736`); the P1/P2 history is untouched.
 
 ---
 
