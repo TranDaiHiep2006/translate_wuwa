@@ -1,0 +1,106 @@
+# WuWa UI labels - these are NEVER a speaker name.
+#
+# A line that matches one of these labels (case-insensitive, ignoring the
+# surrounding whitespace and an optional trailing colon) is a menu header, a
+# quest title or a button - not the name of a character.
+#
+# Edit this file freely: every entry is added to the blacklist.
+
+labels:
+  - Quest
+  - Quests
+  - Quest Log
+  - Journal
+  - Objective
+  - Objectives
+  - Mission
+  - Missions
+  - Task
+  - Tasks
+  - Inventory
+  - Items
+  - Bag
+  - Backpack
+  - Skill
+  - Skills
+  - Ability
+  - Abilities
+  - Weapon
+  - Weapons
+  - Equipment
+  - Settings
+  - Setting
+  - Options
+  - Option
+  - Menu
+  - Map
+  - Character
+  - Characters
+  - Resonator
+  - Resonators
+  - Team
+  - Party
+  - Handbook
+  - Guide
+  - Tutorial
+  - Event
+  - Events
+  - Shop
+  - Store
+  - Mail
+  - Notice
+  - News
+  - Achievements
+  - Achievement
+  - Archive
+  - Codex
+  - Adventure
+  - Tower
+  - Tower of Adversity
+  - Controller
+  - Controller Details
+  - Disc
+  - Echo
+  - Echoes
+  - Tacet Mark
+  - Upgrade
+  - Upgrades
+  - Details
+  - Info
+  - Information
+  - Instructions
+  - Description
+  - Rewards
+  - Reward
+  - Progress
+  - Rank
+  - Level
+  - Lv
+  - Attribute
+  - Attributes
+  - Party Settings
+  - Combat
+  - Adventure Rank
+  - Union
+  - Union Level
+  - Rewards Preview
+  - Multiplayer
+  - Co-op
+  - Photograph
+  - Album
+  - Sound
+  - Graphics
+  - Display
+  - Controls
+  - Keybind
+  - Logout
+  - Exit
+  - Cancel
+  - Confirm
+  - Close
+  - Back
+  - Continue
+  - Skip
+  - Yes
+  - No
+  - OK

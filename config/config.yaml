@@ -32,16 +32,45 @@ speaker_gap_px: 120
 # Maximum words in a line that may be a speaker name.
 speaker_max_words: 3
 
+# --- ROI OCR (P2) ---------------------------------------------------------
+# Only the changed part of the screen is read by the OCR. This is the
+# biggest latency win: the OCR of a dialogue-only change drops from ~800 ms
+# to ~150-300 ms.
+roi_enabled: true
+
+# Padding around the changed rectangle (reference pixels at 1080p height,
+# scaled at runtime with Config.scale()).
+roi_padding_px: 16
+
+# A changed area smaller than this (in pixels, scaled) cannot hold any
+# readable text, so the OCR is skipped entirely.
+roi_min_area: 400
+
+# Above this fraction of the screen the whole frame is read instead of a
+# huge ROI.
+roi_full_frame_threshold: 0.8
+
+# The whole frame is re-read at least this often (ms) to prune the blocks
+# whose text disappeared and to catch the text the ROI missed.
+roi_full_refresh_ms: 2000
+
+# ... or after this many frames, whichever comes first.
+roi_full_refresh_frames: 10
+
 overlay:
   font_family: "Segoe UI"
   font_size: 20          # reference size at 1080p height; scaled at runtime
   text_color: "#FFD54F"
+  speaker_color: "#7FD8FF"
   background_color: "#000000"
-  background_alpha: 140  # 0-255
+  # 255 = fully opaque, so the original English text is completely hidden.
+  background_alpha: 255
   padding: 6
   margin: 10
   show_status: true     # show TRANSLATING / OFF in the screen corner
   status_font_size: 16
+  # How much the box may grow vertically before the font size is reduced.
+  max_height_growth: 3.0
 
 hotkey: F8
 
@@ -51,6 +80,17 @@ translation:
   device: cpu           # cpu | cuda  (P1 runs on CPU: the game owns the GPU)
   batch_size: 8
   max_workers: 1
+  # Translate a block sentence by sentence, so the model can not mangle the
+  # sentence that carries a number.
+  split_sentences: true
+  # Sentence splitter: "regex" (fast, default) or "stanza" (the Argos one).
+  sentence_splitter: regex
+
+# Speaker detection: the UI-label blacklist and the character roster.
+speaker:
+  enabled: true
+  ui_labels_path: config/ui_labels.yaml
+  roster_path: config/roster.yaml
 
 capture:
   # Preferred backend: "auto" tries dxcam first then falls back to mss.

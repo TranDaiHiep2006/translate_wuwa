@@ -149,6 +149,121 @@ def make_scaled(path: Path) -> None:
     canvas.save(path)
 
 
+def make_roi_base(path: Path) -> None:
+    """(d-1) the reference frame of the ROI test.
+
+    It is the dialogue fixture with a *second* line at the bottom, so the
+    "changed" frame only differs in that last line.
+    """
+    width, height = 1920, 1080
+    image = Image.new("RGB", (width, height), (18, 20, 26))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([200, 780, 1720, 980], fill=(32, 36, 46), outline=(120, 130, 150))
+    draw.text((240, 700), "Jiyan", font=load_font(30), fill=(255, 214, 102))
+    draw_lines(
+        draw,
+        [
+            ("The Tacet Field is spreading across the northern plains.", (235, 235, 240)),
+            ("Resonators must reach the Storm City before nightfall.", (235, 235, 240)),
+            ("You obtained a new Waveplate for your Rover.", (235, 235, 240)),
+            ("The first line stays the same in both frames.", (235, 235, 240)),
+        ],
+        origin=(240, 800),
+        size=26,
+        spacing=10,
+    )
+    image.save(path)
+
+
+def make_roi_changed(path: Path) -> None:
+    """(d-2) the same frame as (d-1) with only the last line changed.
+
+    The difference between the two frames is a single line at the bottom of
+    the dialogue box, which is exactly the case the ROI OCR has to handle.
+    """
+    width, height = 1920, 1080
+    image = Image.new("RGB", (width, height), (18, 20, 26))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([200, 780, 1720, 980], fill=(32, 36, 46), outline=(120, 130, 150))
+    draw.text((240, 700), "Jiyan", font=load_font(30), fill=(255, 214, 102))
+    draw_lines(
+        draw,
+        [
+            ("The Tacet Field is spreading across the northern plains.", (235, 235, 240)),
+            ("Resonators must reach the Storm City before nightfall.", (235, 235, 240)),
+            ("You obtained a new Waveplate for your Rover.", (235, 235, 240)),
+            ("The last line changed to something completely different.", (240, 200, 120)),
+        ],
+        origin=(240, 800),
+        size=26,
+        spacing=10,
+    )
+    image.save(path)
+
+
+def make_long_dialogue(path: Path) -> None:
+    """(e) a long dialogue that needs to be wrapped inside the bbox."""
+    width, height = 1920, 1080
+    image = Image.new("RGB", (width, height), (18, 20, 26))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([200, 780, 1720, 980], fill=(32, 36, 46), outline=(120, 130, 150))
+    draw.text((240, 700), "Shorekeeper", font=load_font(30), fill=(255, 214, 102))
+    draw_lines(
+        draw,
+        [
+            (
+                "The Shorekeeper has granted you a blessing for the next "
+                "expedition into the Tacet Field, and it will protect you.",
+                (235, 235, 240),
+            ),
+        ],
+        origin=(240, 810),
+        size=28,
+        spacing=16,
+    )
+    image.save(path)
+
+
+def make_reward_quest(path: Path) -> None:
+    """(f) a quest block with the "Reward: 12000" line."""
+    width, height = 1920, 1080
+    image = Image.new("RGB", (width, height), (14, 16, 22))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([300, 260, 1620, 480], fill=(26, 30, 40), outline=(100, 110, 130))
+    draw.text((340, 290), "Quest", font=load_font(34), fill=(255, 214, 102))
+    draw_lines(
+        draw,
+        [
+            ("Complete the quest to reach the Storm City", (230, 230, 235)),
+            ("before the storm arrives. Reward: 12000", (230, 230, 235)),
+        ],
+        origin=(340, 350),
+        size=26,
+        spacing=12,
+    )
+    image.save(path)
+
+
+def make_ui_menu(path: Path) -> None:
+    """(g) a menu with the Quest / Skill / Inventory / Settings labels."""
+    width, height = 1920, 1080
+    image = Image.new("RGB", (width, height), (16, 18, 24))
+    draw = ImageDraw.Draw(image)
+    draw.rectangle([700, 200, 1220, 880], fill=(28, 32, 42), outline=(110, 120, 140))
+    font = load_font(30)
+    items = [
+        ("Quest", (255, 214, 102)),
+        ("Skill", (255, 214, 102)),
+        ("Inventory", (235, 235, 240)),
+        ("Settings", (235, 235, 240)),
+    ]
+    y = 250
+    for text, color in items:
+        draw.text((760, y), font=font, fill=color, text=text)
+        y += 70
+    image.save(path)
+
+
 def main() -> int:
     """Create all fixtures."""
     FIXTURE_DIR.mkdir(parents=True, exist_ok=True)
@@ -156,6 +271,11 @@ def main() -> int:
     make_quest(FIXTURE_DIR / "sample_b_quest.png")
     make_menu(FIXTURE_DIR / "sample_c_menu.png")
     make_scaled(FIXTURE_DIR / "sample_a_dialogue_2560x1600.png")
+    make_roi_base(FIXTURE_DIR / "sample_d_roi_base.png")
+    make_roi_changed(FIXTURE_DIR / "sample_d_roi_changed.png")
+    make_long_dialogue(FIXTURE_DIR / "sample_e_long.png")
+    make_reward_quest(FIXTURE_DIR / "sample_f_reward.png")
+    make_ui_menu(FIXTURE_DIR / "sample_g_ui_menu.png")
     for path in sorted(FIXTURE_DIR.glob("*.png")):
         print(f"created {path.name} ({Image.open(path).size})")
     return 0

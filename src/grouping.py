@@ -9,7 +9,11 @@ Rules implemented here:
   - the part before a colon inside the same line (``Name: dialogue``), or
   - a short, capitalised line (1-3 words, no sentence-ending period) sitting
   directly above the dialogue block.
-* The speaker name is never translated and is never invented.
+* A speaker name is **never** a blacklisted UI label (Quest, Skill, ...) and
+  it is only accepted when it is in the character roster or when it ends with
+  a colon (see :mod:`src.speakers`).
+
+The speaker name is never translated and is never invented.
 """
 
 from __future__ import annotations
@@ -19,12 +23,14 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Tuple
 
 from .ocr import OCRLine
+from .speakers import DEFAULT_VOCABULARY, SpeakerVocabulary, looks_like_name
 
 _NAME_COLON_RE = re.compile(
     r"^\s*([A-Z][A-Za-z'\-]*(?:\s+[A-Z][A-Za-z'\-]*){0,2})\s*:\s*(.+)$"
 )
 _SENTENCE_END = ".!?…"
 _CAP_WORD_RE = re.compile(r"^[A-Z][A-Za-z'\-]*$")
+_COLON = ":"
 
 
 @dataclass
@@ -88,8 +94,17 @@ def group_lines(
     return groups
 
 
-def is_speaker_line(line: OCRLine, max_words: int = 3) -> bool:
-    """Return True when the line looks like a speaker name."""
+def is_speaker_line(
+    line: OCRLine,
+    max_words: int = 3,
+    vocabulary: Optional[SpeakerVocabulary] = None,
+) -> bool:
+    """Return True when the line can be the name of a speaker.
+
+    The line must be short, capitalised and must not be a blacklisted UI
+    label. When a vocabulary is given, the name must also be in the roster or
+    carry a trailing colon.
+    """
     text = line.text.strip()
     if not text or len(text) > 40:
         return False
@@ -98,7 +113,11 @@ def is_speaker_line(line: OCRLine, max_words: int = 3) -> bool:
     words = text.split()
     if not 1 <= len(words) <= max_words:
         return False
-    return all(_CAP_WORD_RE.match(w) for w in words)
+    if not all(_CAP_WORD_RE.match(w) for w in words):
+        return False
+    if vocabulary is None:
+        return True
+    return looks_like_name(text, vocabulary, max_words=max_words)
 
 
 def detect_speaker(
@@ -107,23 +126,36 @@ def detect_speaker(
     speaker_gap_px: int = 60,
     scale: float = 1.0,
     max_words: int = 3,
+    vocabulary: Optional[SpeakerVocabulary] = None,
 ) -> Optional[str]:
     """Detect the speaker name of a block.
 
     First the ``Name: dialogue`` form inside the block is checked, then a short
-    capitalised line directly above the block.
+    capitalised line directly above the block. A blacklisted UI label is never
+    returned.
     """
+    vocabulary = vocabulary or DEFAULT_VOCABULARY
+
     for line in block_lines:
         match = _NAME_COLON_RE.match(line.text.strip())
         if match and len(match.group(1).split()) <= max_words + 1:
-            return match.group(1).strip()
+            name = match.group(1).strip()
+            if vocabulary.is_ui_label(name):
+                continue
+            return name
 
-    if previous_line is not None and is_speaker_line(previous_line, max_words):
+    if previous_line is not None and is_speaker_line(
+        previous_line, max_words, vocabulary
+    ):
         max_gap = max(1.0, speaker_gap_px * scale)
         gap = block_lines[0].top - previous_line.bottom
         if 0 <= gap <= max_gap:
             return previous_line.text.strip()
     return None
+
+
+_COLON = ":"
+
 
 def build_blocks(
     lines: List[OCRLine],
@@ -131,12 +163,14 @@ def build_blocks(
     speaker_gap_px: int = 120,
     scale: float = 1.0,
     max_words: int = 3,
+    vocabulary: Optional[SpeakerVocabulary] = None,
 ) -> List[TextBlock]:
     """Group the OCR lines and attach the detected speaker name to each block.
 
     A line that turned out to be a speaker name is not translated on its own:
     it is removed from the dialogue text of the block below it.
     """
+    vocabulary = vocabulary or DEFAULT_VOCABULARY
     ordered = sorted(lines, key=lambda ln: (ln.top, ln.left))
     groups = group_lines(ordered, gap_px=gap_px, scale=scale)
 
@@ -150,6 +184,7 @@ def build_blocks(
                 speaker_gap_px=speaker_gap_px,
                 scale=scale,
                 max_words=max_words,
+                vocabulary=vocabulary,
             )
         )
 

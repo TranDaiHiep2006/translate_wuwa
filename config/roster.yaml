@@ -1,0 +1,63 @@
+# WuWa character roster - the names that CAN be a speaker.
+#
+# A short capitalised line above a dialogue is only treated as a speaker when
+# its name is in this list, or when it ends with a colon and has 1-3 words.
+# The names in "labels" (config/ui_labels.yaml) are never a speaker.
+#
+# Edit this file freely: add the name of a new Resonator or NPC and the
+# speaker detector will accept it immediately.
+
+# The playable Resonators.
+playable:
+  - Rover
+  - Jiyan
+  - Changli
+  - Carlotta
+  - Shorekeeper
+  - Encore
+  - Jinhsi
+  - Calcharo
+  - Yangyang
+  - Zhezhi
+  - Verina
+  - Sanada
+  - Cartethyia
+  - Augusta
+  - Iuno
+  - Zani
+  - Ciaccona
+  - Galbrena
+  - Phrolova
+  - Camellya
+  - Brant
+  - Lupa
+  - Youhu
+  - Lumi
+  - Mornye
+  - Aalto
+  - Rover (Female)
+  - Female Rover
+
+# Non playable characters and NPCs.
+npcs:
+  - Jinhsi
+  - Xianyun
+  - Camellya
+  - Yuanwu
+  - Shenzhi
+  - Baizhi
+  - Lingyang
+  - Yinlin
+  - Zani
+  - Septimont
+  - Augusta
+  - Iuno
+  - Galbrena
+  - Phrolova
+  - Brant
+  - Rover's Mother
+  - Custodian
+  - The Shorekeeper
+  - Tacet Discord
+  - Tacet Field
+  - Abomination

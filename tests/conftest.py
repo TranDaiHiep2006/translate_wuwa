@@ -50,3 +50,33 @@ def menu_image(fixture_dir: Path):
 def scaled_image(fixture_dir: Path):
     """The 2560x1600 fixture (the dialogue image scaled up)."""
     return _load(fixture_dir / "sample_a_dialogue_2560x1600.png")
+
+
+@pytest.fixture(scope="session")
+def roi_base_image(fixture_dir: Path):
+    """The reference frame of the ROI test (the dialogue + a last line)."""
+    return _load(fixture_dir / "sample_d_roi_base.png")
+
+
+@pytest.fixture(scope="session")
+def roi_changed_image(fixture_dir: Path):
+    """The same frame with only the last line changed."""
+    return _load(fixture_dir / "sample_d_roi_changed.png")
+
+
+@pytest.fixture(scope="session")
+def long_image(fixture_dir: Path):
+    """A long dialogue that has to be wrapped inside the bbox."""
+    return _load(fixture_dir / "sample_e_long.png")
+
+
+@pytest.fixture(scope="session")
+def reward_image(fixture_dir: Path):
+    """A quest block with the "Reward: 12000" line."""
+    return _load(fixture_dir / "sample_f_reward.png")
+
+
+@pytest.fixture(scope="session")
+def ui_menu_image(fixture_dir: Path):
+    """A menu with the Quest / Skill / Inventory / Settings labels."""
+    return _load(fixture_dir / "sample_g_ui_menu.png")

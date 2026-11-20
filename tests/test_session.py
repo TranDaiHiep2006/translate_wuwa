@@ -86,3 +86,37 @@ def test_the_entries_are_separated_by_a_blank_line(tmp_path: Path) -> None:
     content = path.read_text(encoding="utf-8")
     assert "\n\n" in content
     assert len(log.read_entries(path)) == 2
+
+
+def test_the_history_does_not_label_a_ui_label_as_a_speaker(tmp_path: Path) -> None:
+    """The session history never shows "Quest:" or "Skill:" as a speaker.
+
+    This is the P1 bug: the UI labels were written in the history file as if
+    they were the name of the character.
+    """
+    from src.capture import frame_from_image
+    from src.config import load_config
+    from src.ocr import OCREngine
+    from src.pipeline import Pipeline
+
+    config = load_config()
+    config.debounce_ms = 0
+    import cv2
+
+    quest_image = cv2.imread(str(PROJECT_ROOT / "tests" / "fixtures" / "sample_b_quest.png"))
+    pipeline = Pipeline(config, ocr_engine=OCREngine())
+    result = pipeline.process_frame(frame_from_image(quest_image))
+
+    log = SessionLog(tmp_path)
+    path = log.start()
+    for block in result.blocks:
+        log.append(
+            source=block.block.text,
+            translation=block.translation,
+            speaker=block.speaker,
+        )
+    log.close()
+
+    content = path.read_text(encoding="utf-8")
+    assert "Quest:" not in content, content
+    assert "Skill:" not in content, content

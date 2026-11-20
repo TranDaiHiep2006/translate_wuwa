@@ -37,12 +37,16 @@ class OverlayConfig:
     font_family: str = "Segoe UI"
     font_size: int = 20
     text_color: str = "#FFD54F"
+    speaker_color: str = "#7FD8FF"
     background_color: str = "#000000"
-    background_alpha: int = 140
+    # 255 = fully opaque: the original English text is completely hidden.
+    background_alpha: int = 255
     padding: int = 6
     margin: int = 10
     show_status: bool = True
     status_font_size: int = 16
+    # How much the box may grow vertically before the font size is reduced.
+    max_height_growth: float = 3.0
 
 
 @dataclass
@@ -53,6 +57,27 @@ class TranslationConfig:
     device: str = "cpu"
     batch_size: int = 8
     max_workers: int = 1
+    # Split a block into sentences and translate each one separately.
+    split_sentences: bool = True
+    # Sentence splitter: "regex" (fast, default) or "stanza" (the Argos one).
+    sentence_splitter: str = "regex"
+    # A block whose whole text is a UI label (Quest, Skill, Inventory, ...)
+    # is left in English instead of being translated.
+    skip_ui_labels: bool = True
+
+
+@dataclass
+class SpeakerConfig:
+    """Speaker detection options.
+
+    ``ui_labels_path`` holds the blacklist of WuWa UI labels (Quest, Skill,
+    Inventory, ...) and ``roster_path`` the list of known character names.
+    Both files are plain YAML and can be edited by the user.
+    """
+
+    ui_labels_path: Path = PROJECT_ROOT / "config" / "ui_labels.yaml"
+    roster_path: Path = PROJECT_ROOT / "config" / "roster.yaml"
+    enabled: bool = True
 
 
 @dataclass
@@ -78,9 +103,26 @@ class Config:
     speaker_gap_px: int = 60
     speaker_max_words: int = 3
     hotkey: str = "F8"
+
+    # -- ROI OCR -----------------------------------------------------------
+    # Only the changed part of the screen is read by the OCR.
+    roi_enabled: bool = True
+    # Padding around the changed rectangle (reference pixels at 1080p height).
+    roi_padding_px: int = 16
+    # A changed area smaller than this (in pixels) cannot hold any text.
+    roi_min_area: int = 400
+    # Above this fraction of the screen the whole frame is read instead.
+    roi_full_frame_threshold: float = 0.8
+    # The whole frame is re-read at least this often (ms) to prune the blocks
+    # whose text disappeared and to catch the text the ROI missed.
+    roi_full_refresh_ms: int = 2000
+    # ... or after this many frames, whichever comes first.
+    roi_full_refresh_frames: int = 10
+
     overlay: OverlayConfig = field(default_factory=OverlayConfig)
     translation: TranslationConfig = field(default_factory=TranslationConfig)
     capture: CaptureConfig = field(default_factory=CaptureConfig)
+    speaker: SpeakerConfig = field(default_factory=SpeakerConfig)
     cache_db_path: Path = PROJECT_ROOT / "data" / "cache.db"
     sessions_dir: Path = PROJECT_ROOT / "data" / "sessions"
     glossary_path: Path = PROJECT_ROOT / "config" / "glossary.yaml"
@@ -118,11 +160,12 @@ def load_config(path: str | Path | None = None) -> Config:
     overlay_data = data.pop("overlay", {}) or {}
     translation_data = data.pop("translation", {}) or {}
     capture_data = data.pop("capture", {}) or {}
+    speaker_data = data.pop("speaker", {}) or {}
     cache_data = data.pop("cache", {}) or {}
     sessions_data = data.pop("sessions", {}) or {}
     glossary_data = data.pop("glossary", {}) or {}
 
-    for key in ("overlay", "translation", "capture"):
+    for key in ("overlay", "translation", "capture", "speaker"):
         data.pop(key, None)
 
     cfg = Config(**{k: v for k, v in data.items() if k in defaults.__dict__})
@@ -131,6 +174,7 @@ def load_config(path: str | Path | None = None) -> Config:
         **{**defaults.translation.__dict__, **translation_data}
     )
     cfg.capture = CaptureConfig(**{**defaults.capture.__dict__, **capture_data})
+    cfg.speaker = SpeakerConfig(**{**defaults.speaker.__dict__, **speaker_data})
 
     if cache_data.get("db_path"):
         cfg.cache_db_path = PROJECT_ROOT / cache_data["db_path"]
@@ -138,6 +182,10 @@ def load_config(path: str | Path | None = None) -> Config:
         cfg.sessions_dir = PROJECT_ROOT / sessions_data["dir"]
     if glossary_data.get("path"):
         cfg.glossary_path = PROJECT_ROOT / glossary_data["path"]
+    if speaker_data.get("ui_labels_path"):
+        cfg.speaker.ui_labels_path = PROJECT_ROOT / speaker_data["ui_labels_path"]
+    if speaker_data.get("roster_path"):
+        cfg.speaker.roster_path = PROJECT_ROOT / speaker_data["roster_path"]
 
     cfg.raw = copy.deepcopy(data)
     return cfg

@@ -33,6 +33,7 @@ from src.ocr import OCREngine
 from src.overlay import OverlayItem, OverlayState, OverlayWidget
 from src.pipeline import Pipeline, PipelineResult, Translator
 from src.session import SessionLog
+from src.speakers import SpeakerVocabulary
 from src.translator import create_engine
 
 logger = logging.getLogger("translate_wuwa")
@@ -218,10 +219,26 @@ def main(argv: Optional[List[str]] = None) -> int:
     session_log = SessionLog(config.sessions_dir)
 
     engine = create_engine(config.translation.engine, device=config.translation.device)
-    translator = Translator(engine, cache, glossary)
+    vocabulary = (
+        SpeakerVocabulary.from_files(
+            config.speaker.ui_labels_path, config.speaker.roster_path
+        )
+        if config.speaker.enabled
+        else None
+    )
+    translator = Translator(
+        engine,
+        cache,
+        glossary,
+        split_sentences=config.translation.split_sentences,
+        vocabulary=vocabulary,
+        skip_ui_labels=config.translation.skip_ui_labels,
+    )
 
     ocr_engine = OCREngine(device=config.translation.device)
-    pipeline = Pipeline(config, ocr_engine=ocr_engine, translator=translator)
+    pipeline = Pipeline(
+        config, ocr_engine=ocr_engine, translator=translator, vocabulary=vocabulary
+    )
 
     backend = create_backend(config.capture.backend, config.capture.monitor)
     logger.info("capture backend: %s", backend.name)

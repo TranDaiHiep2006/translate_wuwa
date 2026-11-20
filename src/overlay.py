@@ -4,6 +4,11 @@ The overlay is drawn with PyQt6 and made click-through with pywin32
 (``WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST``). It never takes the
 focus and never blocks the game input.
 
+The Vietnamese text is wrapped inside the width of the original bounding box
+and the box grows vertically when the translation needs more room, so no text
+is ever clipped. The background is fully opaque by default, so the original
+English text is completely hidden.
+
 All geometry is derived from the real screen size reported by the capture
 backend, so nothing is hardcoded for a specific resolution.
 """
@@ -11,13 +16,14 @@ backend, so nothing is hardcoded for a specific resolution.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import List, Optional, Tuple
 
-from PyQt6.QtCore import QObject, QPoint, QRect, QSize, Qt, pyqtSignal
+from PyQt6.QtCore import QObject, QRect, Qt, pyqtSignal
 from PyQt6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PyQt6.QtWidgets import QApplication, QWidget
 
 from .config import OverlayConfig
+from .wrapping import WrappedText, fit_text, split_display_text
 
 
 @dataclass
@@ -36,7 +42,12 @@ class OverlayItem:
         return self.text
 
     def rect(self) -> QRect:
-        return QRect(self.bbox[0], self.bbox[1], self.bbox[2] - self.bbox[0], self.bbox[3] - self.bbox[1])
+        return QRect(
+            self.bbox[0],
+            self.bbox[1],
+            self.bbox[2] - self.bbox[0],
+            self.bbox[3] - self.bbox[1],
+        )
 
 
 @dataclass
@@ -61,6 +72,99 @@ class OverlayBridge(QObject):
     def close(self) -> None:
         """Ask the overlay window to close."""
         self.state_changed.emit(None)
+
+
+def paint_overlay(
+    painter: QPainter,
+    state: OverlayState,
+    config: OverlayConfig,
+) -> None:
+    """Draw every translation block and the ON/OFF status.
+
+    The very same function is used by the live overlay window and by
+    ``scripts/render_overlay_demo.py``, so the demo image is a true proof of
+    what the tool draws.
+    """
+    painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+    height = state.screen_height
+    font_size = int(round(config.font_size * (height / 1080.0)))
+    font = QFont(config.font_family)
+    font.setPixelSize(max(8, font_size))
+    painter.setFont(font)
+    metrics = QFontMetrics(font)
+
+    text_color = QColor(config.text_color)
+    speaker_color = QColor(config.speaker_color)
+    bg_color = QColor(config.background_color)
+    bg_color.setAlpha(int(config.background_alpha))
+    padding = max(2, int(round(config.padding * height / 1080.0)))
+    line_height = metrics.lineSpacing()
+
+    for item in state.items:
+        rect = item.rect()
+        if rect.width() <= 0 or rect.height() <= 0:
+            continue
+
+        speaker, body = split_display_text(item.speaker, item.text)
+        # The text is wrapped inside the width of the original box.
+        wrapped: WrappedText = fit_text(
+            body,
+            lambda text: metrics.horizontalAdvance(text),
+            rect.width(),
+            rect.height(),
+            font_size,
+            line_height,
+            max_growth=config.max_height_growth,
+        )
+        if wrapped.font_size != font_size:
+            font = QFont(config.font_family)
+            font.setPixelSize(max(8, wrapped.font_size))
+            painter.setFont(font)
+            metrics = QFontMetrics(font)
+            line_height = metrics.lineSpacing()
+
+        # The background covers the original text completely.
+        bg_rect = QRect(
+            rect.x() - padding,
+            rect.y() - padding,
+            rect.width() + 2 * padding,
+            max(rect.height(), wrapped.box_height) + 2 * padding,
+        )
+        painter.fillRect(bg_rect, bg_color)
+
+        y = bg_rect.y() + padding
+        for index, line in enumerate(wrapped.lines):
+            if index == 0 and speaker:
+                painter.setPen(QPen(speaker_color))
+                painter.drawText(
+                    QRect(bg_rect.x() + padding, y, bg_rect.width(), line_height),
+                    int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+                    f"{speaker}: {line}",
+                )
+                painter.setPen(QPen(text_color))
+            else:
+                painter.drawText(
+                    QRect(bg_rect.x() + padding, y, bg_rect.width(), line_height),
+                    int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+                    line,
+                )
+            y += line_height
+
+    if config.show_status:
+        status_font = QFont(config.font_family)
+        status_font.setPixelSize(
+            max(8, int(round(config.status_font_size * height / 1080.0)))
+        )
+        painter.setFont(status_font)
+        painter.setPen(
+            QPen(QColor("#00FF88") if state.active else QColor("#888888"))
+        )
+        margin = max(4, int(round(config.margin * height / 1080.0)))
+        painter.drawText(
+            QRect(margin, margin, 400, 40),
+            int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
+            "TRANSLATING" if state.active else "OFF",
+        )
 
 
 class OverlayWidget(QWidget):
@@ -133,54 +237,10 @@ class OverlayWidget(QWidget):
         self.update()
 
     # -- painting ----------------------------------------------------------
-    def _scaled(self, value: float) -> int:
-        return int(round(self.config.font_size * (self._state.screen_height / 1080.0)))
-
     def paintEvent(self, event) -> None:  # noqa: N802 - Qt API
         """Draw every translation block and the ON/OFF status."""
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
-        font = QFont(self.config.font_family)
-        font.setPixelSize(max(8, self._scaled(self.config.font_size)))
-        painter.setFont(font)
-
-        text_color = QColor(self.config.text_color)
-        bg_color = QColor(self.config.background_color)
-        bg_color.setAlpha(int(self.config.background_alpha))
-        padding = max(2, int(round(self.config.padding * self._state.screen_height / 1080.0)))
-
-        for item in self._state.items:
-            rect = item.rect()
-            if rect.width() <= 0 or rect.height() <= 0:
-                continue
-            # The background covers the original text completely.
-            bg_rect = QRect(
-                rect.x() - padding,
-                rect.y() - padding,
-                rect.width() + 2 * padding,
-                rect.height() + 2 * padding,
-            )
-            painter.fillRect(bg_rect, bg_color)
-            painter.setPen(QPen(text_color))
-            painter.drawText(
-                bg_rect,
-                int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
-                item.display_text,
-            )
-
-        if self.config.show_status:
-            status_font = QFont(self.config.font_family)
-            status_font.setPixelSize(
-                max(8, int(round(self.config.status_font_size * self._state.screen_height / 1080.0)))
-            )
-            painter.setFont(status_font)
-            painter.setPen(QPen(QColor("#00FF88") if self._state.active else QColor("#888888")))
-            margin = max(4, int(round(self.config.margin * self._state.screen_height / 1080.0)))
-            painter.drawText(
-                QRect(margin, margin, 400, 40),
-                int(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
-                "TRANSLATING" if self._state.active else "OFF",
-            )
+        paint_overlay(painter, self._state, self.config)
         painter.end()
 
 
