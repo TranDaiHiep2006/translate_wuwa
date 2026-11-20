@@ -36,7 +36,17 @@ python -c "import argostranslate.package as p; p.update_package_index(); pkg=[x 
 python -c "from transformers import MarianMTModel, MarianTokenizer; M='Helsinki-NLP/opus-mt-en-vi'; MarianTokenizer.from_pretrained(M); MarianMTModel.from_pretrained(M)"
 ```
 
-After that you can disconnect the network: the tool still translates.
+After that you can disconnect the network: the tool still translates. The
+Argos engine uses Stanza as its sentence splitter; `src/offline.py` patches it
+so it never tries to reach GitHub for `resources.json` - the model files are
+already bundled inside the Argos package. `tests/test_offline.py` proves it by
+blocking every socket connection.
+
+To check the offline behaviour yourself:
+
+```powershell
+python -m pytest tests\test_offline.py -q
+```
 
 ---
 

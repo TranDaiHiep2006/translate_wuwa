@@ -21,7 +21,6 @@ data/*.db
 data/*.db-wal
 data/*.db-shm
 data/sessions/
-data/cache.db
 bench_cache.db
 
 # Logs

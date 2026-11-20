@@ -83,6 +83,11 @@ class ArgosEngine(BaseEngine):
         except Exception as exc:
             raise TranslationError(f"argostranslate is not installed: {exc}") from exc
 
+        # Stanza must not try to reach GitHub for the resources.json.
+        from .offline import patch_stanza_offline
+
+        patch_stanza_offline()
+
         installed = argostranslate.translate.get_installed_languages()
         source = next((l for l in installed if l.code == "en"), None)
         target = next((l for l in installed if l.code == "vi"), None)

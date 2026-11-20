@@ -123,6 +123,7 @@ class TranslationWorker(threading.Thread):
             return
 
         items: List[OverlayItem] = []
+        new_ids = {id(block) for block in result.newly_translated}
         for translated in result.blocks:
             if not translated.translation.strip():
                 continue
@@ -134,7 +135,7 @@ class TranslationWorker(threading.Thread):
                     speaker=translated.speaker,
                 )
             )
-            if translated in result.newly_translated:
+            if id(translated) in new_ids:
                 self.session_log.append(
                     source=translated.block.text,
                     translation=translated.translation,

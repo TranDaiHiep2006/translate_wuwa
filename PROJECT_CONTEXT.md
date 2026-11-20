@@ -143,6 +143,7 @@ python -c "from transformers import MarianMTModel, MarianTokenizer; M='Helsinki-
 | `src/cache.py` | SQLite `cache` + `history` tables, `normalize()` |
 | `src/glossary.py` | placeholder protect / restore |
 | `src/translator.py` | `BaseEngine` / `ArgosEngine` / `MarianEngine`, benchmark |
+| `src/offline.py` | patches Stanza so Argos never downloads anything |
 | `src/overlay.py` | PyQt6 transparent click-through window, `OverlayItem` |
 | `src/session.py` | session history file, `SessionLog` |
 | `src/pipeline.py` | connects the stages, `StageTimings` per stage |
@@ -153,13 +154,16 @@ python -c "from transformers import MarianMTModel, MarianTokenizer; M='Helsinki-
 ## 10. P1 status (2026-11-20)
 
 - Skeleton + end-to-end pipeline: **done**.
-- Tests: **41 passed**.
+- Tests: **44 passed**.
 - Engine selected: **Argos** (see the P1 report).
-- Capture selected: see the P1 report (mss vs dxcam on the real machine).
-- The measured latency on this machine is **above 0.5 s**; the slowest stage
-  is the **OCR inference** (ONNX Runtime). P2 must attack it first
-  (region-of-interest OCR, smaller detection model, or a GPU pass when the
-  game is not running).
+- Capture selected: **dxcam** (3.0 ms vs 61.5 ms for mss on this machine).
+- The measured latency on this machine is **above 0.5 s**: the average
+  end-to-end time is **1584 ms cold** / **778 ms warm** on a 1920x1080 image.
+  The slowest stage is the **OCR inference** (ONNX Runtime, ~830-1830 ms);
+  the translation is only ~50-280 ms.
+- The tool works fully offline (`src/offline.py` patches Stanza so it never
+  downloads `resources.json`; `tests/test_offline.py` blocks every socket and
+  still translates).
 
 ### P2 ideas (not yet implemented)
 
@@ -169,8 +173,11 @@ python -c "from transformers import MarianMTModel, MarianTokenizer; M='Helsinki-
 2. **Detection model**: use the PP-OCR mobile detection model
    (`det_limit_side_len` / `PP-OCRv4 mobile`) instead of the server one.
 3. **ONNX Runtime tuning**: `intra_op_num_threads` is already 5 (measured
-   optimum on this CPU); try `graph_optimization_level` and `quantization`.
+   optimum on this CPU, it cut the OCR from ~1980 ms to ~810 ms); try
+   `graph_optimization_level` and int8 quantization.
 4. **Translate asynchronously**: keep the last translation on screen while
    the new one is computed.
 5. **Block reuse**: a block whose text did not change must never trigger a
    model call (already implemented in `src/pipeline.py` via `_shown`).
+6. **Overlay text wrapping**: the demo translation is one long line, it should
+   be wrapped inside the original bbox width.
