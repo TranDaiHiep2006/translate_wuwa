@@ -14,10 +14,13 @@
 | --- | --- | --- |
 | 1 | `74946b4` | P1: WuWa screen translation tool - skeleton + end-to-end offline pipeline |
 | 2 | `c30f235` | P1: offline Stanza patch, offline tests, demo scripts, final measurements |
+| 3 | `96e568e` | P1: add REPORT.md with the measured results |
 
-* Local HEAD: `c30f23544bc9d476149ca570e8f67f2614176f0f`
-* GitHub: <https://github.com/TranDaiHiep2006/translate_wuwa/commit/c30f23544bc9d476149ca570e8f67f2614176f0f>
-* **The push succeeded** (`74946b4..c30f235  main -> main`).
+* Local HEAD: `96e568e`
+* GitHub: <https://github.com/TranDaiHiep2006/translate_wuwa/commit/96e568e>
+* **The push succeeded** for all three commits:
+  * `74946b4..c30f235  main -> main`
+  * `c30f235..96e568e  main -> main`
 
 ### Files created (38 tracked files)
 
